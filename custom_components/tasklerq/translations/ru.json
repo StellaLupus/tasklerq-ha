@@ -1,0 +1,218 @@
+{
+  "exceptions": {
+    "conflict": {
+      "message": "Tasklerq: позиция уже изменена в Tasklerq. Обновите и повторите действие."
+    },
+    "reauth_required": {
+      "message": "Tasklerq: нужна повторная авторизация. Обновите токен интеграции."
+    },
+    "write_forbidden": {
+      "message": "У токена Tasklerq нет прав на запись: нужен scope ha:write."
+    },
+    "not_found": {
+      "message": "Список или задача не найдены в Tasklerq. Возможно, они удалены; список обновлён."
+    },
+    "validation_error": {
+      "message": "Tasklerq отклонил изменения задачи{reason}."
+    },
+    "unavailable": {
+      "message": "Tasklerq недоступен. Проверьте подключение и повторите попытку."
+    },
+    "write_failed": {
+      "message": "Не удалось сохранить изменения в Tasklerq. Проверьте подключение и повторите попытку."
+    },
+    "capture_action_forbidden": {
+      "message": "У токена Tasklerq нет прав на capture: нужен scope capture:write."
+    },
+    "capture_action_reauth": {
+      "message": "Tasklerq: нужна повторная авторизация. Обновите токен интеграции."
+    },
+    "capture_action_unavailable": {
+      "message": "Tasklerq недоступен. Проверьте подключение и повторите попытку."
+    },
+    "capture_ambiguous_entry": {
+      "message": "Несколько подключений Tasklerq. Укажите list_id из списков нужного подключения."
+    },
+    "capture_conflict": {
+      "message": "Tasklerq уже обрабатывает этот capture. Повторите попытку позже. Если задача не появилась, добавьте текст «{text}» снова."
+    },
+    "capture_disabled": {
+      "message": "Capture API в Tasklerq выключен. Текст «{text}» не сохранён."
+    },
+    "capture_failed": {
+      "message": "Не удалось отправить текст «{text}» в Tasklerq. Возможно, он не сохранён: проверьте список и повторите попытку."
+    },
+    "capture_forbidden": {
+      "message": "У токена Tasklerq нет прав на capture: нужен scope capture:write. Текст «{text}» не сохранён."
+    },
+    "capture_invalid": {
+      "message": "Tasklerq отклонил capture{reason}. Текст «{text}» не сохранён."
+    },
+    "capture_llm_unavailable": {
+      "message": "Tasklerq не смог разобрать текст: разбор недоступен. Текст «{text}» не сохранён."
+    },
+    "capture_not_configured": {
+      "message": "Tasklerq не настроен или не загружен. Добавьте интеграцию Tasklerq."
+    },
+    "capture_rate_limited": {
+      "message": "Слишком много запросов capture к Tasklerq. Повторите через {retry_after} сек. Текст «{text}» не сохранён."
+    },
+    "capture_reauth": {
+      "message": "Tasklerq: нужна повторная авторизация. Текст «{text}» не сохранён. Обновите токен интеграции."
+    },
+    "capture_too_long": {
+      "message": "Текст для capture слишком длинный. Текст «{text}» не сохранён."
+    },
+    "capture_unavailable": {
+      "message": "Tasklerq недоступен. Возможно, текст «{text}» не сохранён: проверьте список и повторите попытку."
+    },
+    "cancel_capture_conflict": {
+      "message": "Capture уже применён. Отменить можно только ожидающий черновик."
+    },
+    "cancel_capture_not_found": {
+      "message": "Черновик capture не найден в Tasklerq, либо Capture API выключен."
+    },
+    "confirm_capture_conflict": {
+      "message": "Черновик capture уже отменён или не может быть подтверждён."
+    },
+    "confirm_capture_expired": {
+      "message": "Черновик capture устарел (старше 15 минут). Создайте новый черновик."
+    },
+    "confirm_capture_invalid": {
+      "message": "Tasklerq отклонил элементы черновика{reason}."
+    },
+    "confirm_capture_not_found": {
+      "message": "Черновик capture не найден в Tasklerq, либо Capture API выключен."
+    },
+    "undo_capture_conflict": {
+      "message": "Элементы последнего capture уже изменены или отменены; ничего не удалено."
+    },
+    "undo_capture_disabled": {
+      "message": "Capture API в Tasklerq выключен."
+    },
+    "undo_capture_unavailable": {
+      "message": "Tasklerq недоступен. Не удалось отменить последний capture. Проверьте подключение и повторите попытку."
+    },
+    "calendar_too_old": {
+      "message": "Tasklerq отдаёт события календаря не дальше чем за 2 года до сегодняшнего дня. Уменьшите период запроса."
+    },
+    "calendar_rejected": {
+      "message": "Tasklerq не смог отдать календарь: слишком большой период или больше 1000 вхождений. Уменьшите период."
+    },
+    "calendar_forbidden": {
+      "message": "У токена Tasklerq нет прав на чтение календаря: нужен scope ha:read."
+    },
+    "calendar_unavailable": {
+      "message": "Не удалось подключиться к Tasklerq для загрузки календаря. Проверьте подключение и повторите попытку."
+    },
+    "calendar_failed": {
+      "message": "Не удалось загрузить события календаря Tasklerq. Проверьте подключение и повторите попытку."
+    }
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "Подключение к Tasklerq",
+        "description": "Укажите URL сервера Tasklerq и API-токен. Токену нужен scope ha:read, а для записи и capture — ha:write и capture:write.",
+        "data": {
+          "url": "URL Tasklerq",
+          "token": "API-токен"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Повторная аутентификация",
+        "description": "Старый токен Tasklerq больше не принимается. Введите новый токен для этого household.",
+        "data": {
+          "token": "API-токен"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Не удаётся подключиться к Tasklerq. Проверьте URL и доступность сервера.",
+      "invalid_url": "Некорректный URL: укажите адрес http:// или https:// с именем хоста.",
+      "https_required": "Для адреса вне локальной сети нужен HTTPS. Укажите https:// в URL Tasklerq.",
+      "invalid_auth": "Неверный токен",
+      "missing_scope": "У токена нет прав: нужен scope ha:read, а для записи и capture — ha:write и capture:write.",
+      "household_not_found": "Household не найден. Возможно, он был удалён.",
+      "unknown": "Неизвестная ошибка Tasklerq. Проверьте адрес сервера и повторите попытку."
+    },
+    "abort": {
+      "already_configured": "Интеграция для этого household уже настроена.",
+      "wrong_household": "Новый токен принадлежит другому household. Текущая запись не изменена.",
+      "reauth_successful": "Токен Tasklerq обновлён."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Параметры Tasklerq",
+        "description": "Настройте периодичность опроса и горизонт календаря.",
+        "data": {
+          "scan_interval": "Интервал polling, секунды",
+          "calendar_days": "Горизонт календаря, дни"
+        }
+      }
+    },
+    "error": {
+      "invalid_scan_interval": "Интервал polling должен быть от 30 до 300 секунд.",
+      "invalid_calendar_days": "Горизонт календаря должен быть от 7 до 90 дней."
+    }
+  },
+  "services": {
+    "capture": {
+      "name": "Захват текста",
+      "description": "Отправить текст в Tasklerq для разбора и создания задач.",
+      "fields": {
+        "text": {
+          "name": "Текст",
+          "description": "Фраза для разбора, например «завтра купить молоко»."
+        },
+        "source": {
+          "name": "Источник",
+          "description": "Источник capture. По умолчанию ha_automation."
+        },
+        "mode": {
+          "name": "Режим",
+          "description": "auto создаёт элементы сразу, draft сохраняет черновик."
+        },
+        "hint": {
+          "name": "Подсказка списка",
+          "description": "Предпочтительный список для разбора."
+        },
+        "list_id": {
+          "name": "Идентификатор списка",
+          "description": "Конкретный список Tasklerq для создаваемых элементов."
+        },
+        "idempotency_key": {
+          "name": "Ключ идемпотентности",
+          "description": "Обычно генерируется компонентом; повторный вызов не создаёт дубликат."
+        }
+      }
+    },
+    "confirm_capture": {
+      "name": "Подтвердить capture",
+      "description": "Подтвердить черновик capture и создать элементы.",
+      "fields": {
+        "draft_id": {
+          "name": "Идентификатор черновика",
+          "description": "Идентификатор черновика, полученный от tasklerq.capture."
+        }
+      }
+    },
+    "cancel_capture": {
+      "name": "Отменить capture",
+      "description": "Отменить черновик capture без создания элементов.",
+      "fields": {
+        "draft_id": {
+          "name": "Идентификатор черновика",
+          "description": "Идентификатор черновика, полученный от tasklerq.capture."
+        }
+      }
+    },
+    "undo_last_capture": {
+      "name": "Отменить последний capture",
+      "description": "Отменить последний голосовой capture за последние 10 минут.",
+      "fields": {}
+    }
+  }
+}

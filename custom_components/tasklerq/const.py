@@ -1,0 +1,27 @@
+"""Константы интеграции Tasklerq."""
+
+DOMAIN = "tasklerq"
+
+MIN_HOME_ASSISTANT_VERSION = "2026.10.0"
+
+CONF_URL = "url"
+CONF_TOKEN = "token"
+CONF_SCAN_INTERVAL = "scan_interval"
+CONF_CALENDAR_DAYS = "calendar_days"
+
+DEFAULT_SCAN_INTERVAL = 60
+MIN_SCAN_INTERVAL = 30
+MAX_SCAN_INTERVAL = 300
+
+# Задержка повторов при ошибках не зависит от границ options интервала polling.
+BACKOFF_INITIAL_SECONDS = 30
+BACKOFF_MAX_SECONDS = 300
+
+DEFAULT_CALENDAR_DAYS = 30
+MIN_CALENDAR_DAYS = 7
+MAX_CALENDAR_DAYS = 90
+
+SERVICE_CAPTURE = "capture"
+SERVICE_CONFIRM_CAPTURE = "confirm_capture"
+SERVICE_CANCEL_CAPTURE = "cancel_capture"
+SERVICE_UNDO_LAST_CAPTURE = "undo_last_capture"
