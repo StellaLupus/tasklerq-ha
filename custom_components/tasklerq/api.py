@@ -13,6 +13,19 @@ REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=10)
 class TasklerqApiError(Exception):
     """Базовая ошибка клиента Tasklerq."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        """Сохранить сообщение и конверт ошибки API, если он есть."""
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.details: dict[str, Any] = details or {}
+
 
 class TasklerqConnectionError(TasklerqApiError):
     """Tasklerq недоступен: нет связи или истёк таймаут."""
@@ -30,12 +43,25 @@ class TasklerqNotFoundError(TasklerqApiError):
     """Объект не найден (404)."""
 
 
+class TasklerqConflictError(TasklerqApiError):
+    """Конфликт версии или состояния (409)."""
+
+
 class TasklerqValidationError(TasklerqApiError):
     """Tasklerq отклонил параметры запроса (422)."""
 
 
 class TasklerqServerError(TasklerqApiError):
     """Tasklerq вернул ошибку сервера или неожиданный ответ."""
+
+
+_ERROR_CLASSES: dict[int, type[TasklerqApiError]] = {
+    401: TasklerqAuthenticationError,
+    403: TasklerqPermissionError,
+    404: TasklerqNotFoundError,
+    409: TasklerqConflictError,
+    422: TasklerqValidationError,
+}
 
 
 class TasklerqList(TypedDict):
@@ -391,49 +417,96 @@ class TasklerqApiClient:
         self._url = url.rstrip("/")
         self._token = token
 
+    async def _async_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+    ) -> Any:
+        """Выполнить запрос и вернуть JSON, преобразовав ошибки клиента."""
+        session = async_get_clientsession(self._hass)
+        headers = {"Authorization": f"Bearer {self._token}"}
+        if json is not None:
+            headers["Content-Type"] = "application/json"
+        url = f"{self._url}{path}"
+
+        try:
+            async with session.request(
+                method,
+                url,
+                headers=headers,
+                params=params,
+                json=json,
+                timeout=REQUEST_TIMEOUT,
+            ) as response:
+                if response.status in (200, 201):
+                    try:
+                        return await response.json(content_type=None)
+                    except ValueError as err:
+                        raise TasklerqServerError(
+                            "Tasklerq returned an invalid JSON response"
+                        ) from err
+                if response.status == 204:
+                    return None
+                raise await self._async_api_error(response)
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise TasklerqConnectionError("Could not connect to Tasklerq") from err
+
+    async def _async_api_error(
+        self, response: aiohttp.ClientResponse
+    ) -> TasklerqApiError:
+        """Собрать ошибку клиента из конверта API или «сырого» ответа."""
+        code: str | None = None
+        message: str | None = None
+        details: dict[str, Any] | None = None
+
+        try:
+            payload = await response.json(content_type=None)
+        except ValueError:
+            payload = None
+        if isinstance(payload, dict):
+            error = payload.get("error")
+            if isinstance(error, dict):
+                raw_code = error.get("code")
+                raw_message = error.get("message")
+                raw_details = error.get("details")
+                if isinstance(raw_code, str):
+                    code = raw_code
+                if isinstance(raw_message, str):
+                    message = raw_message
+                if isinstance(raw_details, dict):
+                    details = cast("dict[str, Any]", raw_details)
+
+        status = response.status
+        error_class = _ERROR_CLASSES.get(status, TasklerqServerError)
+        return error_class(
+            message or f"Tasklerq returned HTTP {status}",
+            code=code,
+            details=details,
+        )
+
     async def _async_get(
         self, path: str, *, params: dict[str, str] | None = None
     ) -> Any:
         """Выполнить GET и вернуть JSON, преобразовав ошибки клиента."""
-        session = async_get_clientsession(self._hass)
-        headers = {"Authorization": f"Bearer {self._token}"}
-        url = f"{self._url}{path}"
-
-        try:
-            async with session.get(
-                url, headers=headers, params=params, timeout=REQUEST_TIMEOUT
-            ) as response:
-                if response.status == 401:
-                    raise TasklerqAuthenticationError("Tasklerq rejected the API token")
-                if response.status == 403:
-                    raise TasklerqPermissionError(
-                        "Tasklerq token is missing the required scope"
-                    )
-                if response.status == 404:
-                    raise TasklerqNotFoundError("Tasklerq resource was not found")
-                if response.status == 422:
-                    raise TasklerqValidationError(
-                        "Tasklerq rejected the request parameters"
-                    )
-                if response.status != 200:
-                    raise TasklerqServerError(
-                        f"Tasklerq returned HTTP {response.status}"
-                    )
-
-                try:
-                    return await response.json(content_type=None)
-                except ValueError as err:
-                    raise TasklerqServerError(
-                        "Tasklerq returned an invalid JSON response"
-                    ) from err
-        except (aiohttp.ClientError, TimeoutError) as err:
-            raise TasklerqConnectionError("Could not connect to Tasklerq") from err
+        return await self._async_request("GET", path, params=params)
 
     async def async_get_household(self) -> dict[str, Any]:
         """Получить household текущего токена."""
-        payload = await self._async_get("/api/v1/household")
+        household, _ = await self.async_get_household_and_members()
+        return household
 
-        household = payload.get("household") if isinstance(payload, dict) else None
+    async def async_get_household_and_members(
+        self,
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        """Получить household и имена участников одним запросом."""
+        payload = await self._async_get("/api/v1/household")
+        if not isinstance(payload, dict):
+            raise TasklerqServerError("Tasklerq response is not an object")
+
+        household = payload.get("household")
         if not isinstance(household, dict):
             raise TasklerqServerError("Tasklerq response does not contain a household")
 
@@ -442,7 +515,14 @@ class TasklerqApiClient:
         if not isinstance(household_id, str) or not isinstance(name, str):
             raise TasklerqServerError("Tasklerq response has an invalid household")
 
-        return cast("dict[str, Any]", household)
+        members: dict[str, str] = {}
+        for value in _list(payload, "members", "household"):
+            data = _dict_value(value, "member")
+            members[_string(data, "id", "member")] = _string(
+                data, "display_name", "member"
+            )
+
+        return cast("dict[str, Any]", household), members
 
     async def async_get_snapshot(
         self,
@@ -459,3 +539,73 @@ class TasklerqApiClient:
 
         payload = await self._async_get("/api/v1/snapshot", params=params)
         return _parse_snapshot(payload)
+
+    async def async_get_household_members(self) -> dict[str, str]:
+        """Получить отображаемые имена активных участников household."""
+        _, members = await self.async_get_household_and_members()
+        return members
+
+    async def async_create_item(
+        self,
+        list_id: str,
+        *,
+        title: str,
+        notes: str | None = None,
+        due_date: str | None = None,
+        due_at: str | None = None,
+        source: str = "ha_todo",
+    ) -> TasklerqItem:
+        """Создать позицию в списке."""
+        body: dict[str, Any] = {"title": title, "source": source}
+        if notes is not None:
+            body["notes"] = notes
+        if due_date is not None:
+            body["due_date"] = due_date
+        elif due_at is not None:
+            body["due_at"] = due_at
+
+        response = await self._async_request(
+            "POST", f"/api/v1/lists/{list_id}/items", json=body
+        )
+        return _parse_item(response)
+
+    async def async_update_item(
+        self,
+        item_id: str,
+        *,
+        version: int,
+        fields: dict[str, Any],
+    ) -> TasklerqItem:
+        """Изменить позицию с оптимистичной блокировкой по version."""  # noqa: RUF002
+        response = await self._async_request(
+            "PATCH",
+            f"/api/v1/items/{item_id}",
+            json={"version": version, **fields},
+        )
+        return _parse_item(response)
+
+    async def async_delete_item(self, item_id: str) -> None:
+        """Мягко удалить позицию."""
+        await self._async_request("DELETE", f"/api/v1/items/{item_id}")
+
+    async def async_complete_item(
+        self, item_id: str, *, version: int | None = None
+    ) -> TasklerqItem:
+        """Завершить позицию, при необходимости проверив version."""
+        response = await self._async_request(
+            "POST",
+            f"/api/v1/items/{item_id}/complete",
+            json=None if version is None else {"version": version},
+        )
+        return _parse_item(response)
+
+    async def async_reopen_item(
+        self, item_id: str, *, version: int | None = None
+    ) -> TasklerqItem:
+        """Открыть завершённую позицию, при необходимости проверив version."""
+        response = await self._async_request(
+            "POST",
+            f"/api/v1/items/{item_id}/reopen",
+            json=None if version is None else {"version": version},
+        )
+        return _parse_item(response)

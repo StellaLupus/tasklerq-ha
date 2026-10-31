@@ -20,6 +20,9 @@ FOURTH_ITEM_ID = "019a1b2c-b1c2-7d3e-8f40-708192a3b4c5"
 FIFTH_ITEM_ID = "019a1b2c-c2d3-7e4f-8a51-8192a3b4c5d6"
 SIXTH_ITEM_ID = "019a1b2c-d3e4-7f5a-9b62-92a3b4c5d6e7"
 
+ASSIGNEE_ID = "019a1b2c-4b6c-7d7e-8f80-1a2b3c4d5e6f"
+TAG_ID = "019a1b2c-aa11-7b22-8c33-445566778899"
+
 TOKEN = "tlq_test"
 NEW_TOKEN = "tlq_new"
 
@@ -31,6 +34,7 @@ def household_payload(
     household_id: str = HOUSEHOLD_ID,
     name: str = "Семья",
     timezone: str = "Europe/Moscow",
+    members: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Ответ GET /api/v1/household по примеру из ha-api.md."""
     return {
@@ -42,7 +46,28 @@ def household_payload(
             "updated_at": "2026-10-01T08:00:00Z",
             "deleted_at": None,
         },
-        "members": [],
+        "members": [] if members is None else members,
+    }
+
+
+def member_payload(
+    member_id: str = ASSIGNEE_ID,
+    display_name: str = "Алексей",
+) -> dict[str, Any]:
+    """Активный участник household по примеру из ha-api.md."""
+    return {
+        "id": member_id,
+        "household_id": HOUSEHOLD_ID,
+        "telegram_user_id": 100000001,
+        "telegram_chat_id": 100000001,
+        "display_name": display_name,
+        "username": "alexey",
+        "role": "owner",
+        "timezone": "Europe/Moscow",
+        "settings": {},
+        "created_at": "2026-10-01T08:00:00Z",
+        "updated_at": "2026-10-01T08:00:00Z",
+        "deleted_at": None,
     }
 
 
@@ -78,6 +103,15 @@ def item_payload(
     status: str = "open",
     version: int = 1,
     due_date: str | None = "2026-11-05",
+    due_at: str | None = None,
+    notes: str | None = None,
+    priority: str = "normal",
+    assignee_user_id: str | None = None,
+    source: str = "ha_todo",
+    recurrence: dict[str, Any] | None = None,
+    tags: list[dict[str, Any]] | None = None,
+    position: int = 0,
+    completed_at: str | None = None,
     updated_at: str = "2026-10-20T09:00:00Z",
 ) -> dict[str, Any]:
     """Объект ItemResponse по примеру из ha-api.md."""
@@ -86,28 +120,63 @@ def item_payload(
         "household_id": HOUSEHOLD_ID,
         "list_id": list_id,
         "title": title,
-        "notes": None,
+        "notes": notes,
         "status": status,
-        "priority": "normal",
-        "due_at": None,
+        "priority": priority,
+        "due_at": due_at,
         "due_date": due_date,
-        "assignee_user_id": None,
+        "assignee_user_id": assignee_user_id,
         "created_by_user_id": None,
-        "source": "ha_todo",
+        "source": source,
         "capture_id": None,
-        "completed_at": None,
+        "completed_at": completed_at,
         "completed_by_user_id": None,
         "quantity": None,
         "unit": None,
-        "position": 0,
+        "position": position,
         "version": version,
-        "recurrence": None,
+        "recurrence": recurrence,
         "created_at": "2026-10-20T09:00:00Z",
         "updated_at": updated_at,
         "deleted_at": None,
-        "tags": [],
+        "tags": [] if tags is None else tags,
         "subtasks": [],
         "subtask_progress": {"done": 0, "total": 0},
+    }
+
+
+def tag_payload(
+    name: str = "дом",
+    tag_id: str = TAG_ID,
+) -> dict[str, Any]:
+    """Тег позиции по примеру из ha-api.md."""  # noqa: RUF002
+    return {
+        "id": tag_id,
+        "household_id": HOUSEHOLD_ID,
+        "name": name,
+        "created_at": "2026-10-20T09:00:00Z",
+    }
+
+
+def recurrence_payload(
+    *,
+    freq: str = "monthly",
+    interval: int = 1,
+    byweekday: list[int] | None = None,
+    until: str | None = None,
+    timezone: str = "Europe/Moscow",
+    anchor_date: str = "2026-11-05",
+    month_rule: str | None = "anchor_day",
+) -> dict[str, Any]:
+    """Правило повторения позиции по примеру из ha-api.md."""
+    return {
+        "freq": freq,
+        "interval": interval,
+        "byweekday": [] if byweekday is None else byweekday,
+        "until": until,
+        "timezone": timezone,
+        "anchor_date": anchor_date,
+        "month_rule": month_rule,
     }
 
 

@@ -5,6 +5,7 @@ from typing import Any
 
 import aiohttp
 import pytest
+from custom_components.tasklerq import async_unload_entry
 from custom_components.tasklerq.const import (
     CONF_TOKEN,
     CONF_URL,
@@ -101,6 +102,29 @@ async def test_unload_one_entry_keeps_services_for_another(
     assert _entry_state(second) is ConfigEntryState.NOT_LOADED
     for service in SERVICES:
         assert not hass.services.has_service(DOMAIN, service)
+
+
+async def test_unload_failure_keeps_services(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Если платформы не выгрузились, сервисы остаются зарегистрированными."""
+    aioclient_mock.get(HOUSEHOLD_URL, json=household_payload())
+    aioclient_mock.get(SNAPSHOT_URL, json=snapshot_payload())
+    entry = _mock_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    async def _fail_unload(*args: Any, **kwargs: Any) -> bool:
+        return False
+
+    monkeypatch.setattr(hass.config_entries, "async_unload_platforms", _fail_unload)
+
+    assert not await async_unload_entry(hass, entry)
+    for service in SERVICES:
+        assert hass.services.has_service(DOMAIN, service)
 
 
 async def test_incompatible_home_assistant_version(

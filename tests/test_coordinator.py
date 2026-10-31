@@ -288,6 +288,7 @@ async def test_daily_resync_replaces_state(
 
     freezer.move_to("2026-11-04T12:00:01+00:00")
     aioclient_mock.clear_requests()
+    aioclient_mock.get(HOUSEHOLD_URL, json=household_payload())
     aioclient_mock.get(
         SNAPSHOT_URL,
         json=snapshot_payload(

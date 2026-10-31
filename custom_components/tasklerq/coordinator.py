@@ -49,6 +49,7 @@ class TasklerqData:
     next_since: str | None
     calendar_truncated: bool
     timezone: str
+    members: dict[str, str]
     last_full_sync: datetime
 
 
@@ -65,6 +66,7 @@ class TasklerqCoordinator(DataUpdateCoordinator[TasklerqData]):
         timezone_name: str,
         scan_interval: int = DEFAULT_SCAN_INTERVAL,
         calendar_days: int = DEFAULT_CALENDAR_DAYS,
+        members: dict[str, str] | None = None,
     ) -> None:
         """Создать координатор с интервалом и горизонтом из options."""  # noqa: RUF002
         super().__init__(
@@ -79,8 +81,14 @@ class TasklerqCoordinator(DataUpdateCoordinator[TasklerqData]):
         self._timezone_name = timezone_name
         self._scan_interval = scan_interval
         self._calendar_days = calendar_days
+        self._members = dict(members or {})
         self._backoff_seconds = MIN_SCAN_INTERVAL
         self._last_full_sync: datetime | None = None
+
+    @property
+    def client(self) -> TasklerqApiClient:
+        """Клиент API для платформ."""
+        return self._client
 
     async def _async_update_data(self) -> TasklerqData:
         """Запросить снапшот и применить его к локальному состоянию."""  # noqa: RUF002
@@ -90,6 +98,8 @@ class TasklerqCoordinator(DataUpdateCoordinator[TasklerqData]):
             or now - self._last_full_sync >= FULL_SYNC_INTERVAL
         )
         since = None if full_sync else self.data.next_since
+        if full_sync and self.data is not None:
+            await self._async_refresh_members()
 
         try:
             snapshot = await self._client.async_get_snapshot(
@@ -137,6 +147,13 @@ class TasklerqCoordinator(DataUpdateCoordinator[TasklerqData]):
             self._apply_backoff()
             raise UpdateFailed(f"Tasklerq synchronization failed: {err}") from err
 
+    async def _async_refresh_members(self) -> None:
+        """Обновить имена участников без влияния на доступность todo-сущностей."""
+        try:
+            self._members = await self._client.async_get_household_members()
+        except TasklerqApiError as err:
+            _LOGGER.warning("Could not refresh Tasklerq household members: %s", err)
+
     def _apply_snapshot(
         self, snapshot: TasklerqSnapshot, *, full_sync: bool, now: datetime
     ) -> TasklerqData:
@@ -170,6 +187,7 @@ class TasklerqCoordinator(DataUpdateCoordinator[TasklerqData]):
             next_since=snapshot.next_since,
             calendar_truncated=snapshot.calendar_truncated,
             timezone=self._timezone_name,
+            members=dict(self._members),
             last_full_sync=last_full_sync,
         )
 

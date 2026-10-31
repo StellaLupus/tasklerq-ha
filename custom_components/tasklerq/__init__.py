@@ -7,6 +7,7 @@ from typing import Any
 
 from awesomeversion import AwesomeVersion
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.const import Platform
 from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import (
@@ -29,6 +30,8 @@ from .coordinator import TasklerqCoordinator, read_options
 from .services import async_setup_services, async_unload_services
 
 _LOGGER = logging.getLogger(__name__)
+
+PLATFORMS: list[Platform] = [Platform.TODO]
 
 
 @dataclass(slots=True)
@@ -69,7 +72,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TasklerqConfigEntry) -> 
         entry.data[CONF_TOKEN],
     )
     try:
-        household = await client.async_get_household()
+        household, members = await client.async_get_household_and_members()
     except TasklerqAuthenticationError as err:
         raise ConfigEntryAuthFailed("Tasklerq rejected the API token") from err
     except (TasklerqConnectionError, TasklerqServerError) as err:
@@ -96,6 +99,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TasklerqConfigEntry) -> 
         timezone_name=timezone_name,
         scan_interval=scan_interval,
         calendar_days=calendar_days,
+        members=members,
     )
     entry.runtime_data = TasklerqRuntimeData(
         client=client,
@@ -106,11 +110,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: TasklerqConfigEntry) -> 
 
     async_setup_services(hass)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: TasklerqConfigEntry) -> bool:
     """Выгрузить интеграцию Tasklerq."""
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if not unloaded:
+        return False
     other_loaded = any(
         other.entry_id != entry.entry_id and other.state is ConfigEntryState.LOADED
         for other in hass.config_entries.async_entries(DOMAIN)
