@@ -1,5 +1,6 @@
 """Асинхронный клиент API Tasklerq."""
 
+import asyncio
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, TypedDict, cast
@@ -10,6 +11,22 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=10)
+
+# Сервер разбирает capture не дольше 8 секунд для ha_voice и 20 секунд
+# для остальных, поэтому HTTP-таймаут увеличен на 2 секунды запаса на БД и сеть.
+CAPTURE_TIMEOUT_VOICE = 10.0
+CAPTURE_TIMEOUT_DEFAULT = 22.0
+
+# Assist ждёт ответа ограниченное время. Бюджет голосового capture — 20 секунд:
+# два серверных окна разбора по 8 секунд плюс запас на HTTP и БД. Это верхняя
+# граница, которую должен выдерживать голосовой pipeline Assist; для остальных
+# источников бюджет шире и не зависит от ответа Assist.
+CAPTURE_RETRY_BUDGET_VOICE = 20.0
+CAPTURE_RETRY_BUDGET_DEFAULT = 45.0
+
+# Сетевой обрыв повторяем ровно один раз; повторы по 409 ограничены бюджетом.
+CAPTURE_MAX_NETWORK_RETRIES = 1
+CAPTURE_DEFAULT_RETRY_AFTER = 2
 
 
 class TasklerqApiError(Exception):
@@ -22,6 +39,7 @@ class TasklerqApiError(Exception):
         code: str | None = None,
         details: dict[str, Any] | None = None,
         status: int | None = None,
+        retry_after: int | None = None,
     ) -> None:
         """Сохранить сообщение, конверт ошибки API и HTTP-статус."""
         fallback = (
@@ -34,6 +52,7 @@ class TasklerqApiError(Exception):
         self.message = message
         self.details: dict[str, Any] = details or {}
         self.status = status
+        self.retry_after = retry_after
 
 
 class TasklerqConnectionError(TasklerqApiError):
@@ -56,6 +75,18 @@ class TasklerqConflictError(TasklerqApiError):
     """Конфликт версии или состояния (409)."""
 
 
+class TasklerqGoneError(TasklerqApiError):
+    """Черновик capture устарел (410)."""
+
+
+class TasklerqPayloadTooLargeError(TasklerqApiError):
+    """Тело запроса больше допустимого (413)."""
+
+
+class TasklerqRateLimitError(TasklerqApiError):
+    """Превышен лимит частоты запросов (429)."""
+
+
 class TasklerqValidationError(TasklerqApiError):
     """Tasklerq отклонил параметры запроса (422)."""
 
@@ -64,12 +95,20 @@ class TasklerqServerError(TasklerqApiError):
     """Tasklerq вернул ошибку сервера или неожиданный ответ."""
 
 
+class TasklerqServiceUnavailableError(TasklerqServerError):
+    """Разбор capture или зависимость недоступны (503)."""
+
+
 _ERROR_CLASSES: dict[int, type[TasklerqApiError]] = {
     401: TasklerqAuthenticationError,
     403: TasklerqPermissionError,
     404: TasklerqNotFoundError,
     409: TasklerqConflictError,
+    410: TasklerqGoneError,
+    413: TasklerqPayloadTooLargeError,
     422: TasklerqValidationError,
+    429: TasklerqRateLimitError,
+    503: TasklerqServiceUnavailableError,
 }
 
 
@@ -170,6 +209,50 @@ class TasklerqCalendarEvent(TypedDict):
     all_day: bool
     title: str
     status: str
+
+
+class TasklerqCaptureItem(TypedDict):
+    """Элемент ответа capture: созданный или из черновика."""
+
+    id: str | None
+    title: str
+    list_id: str | None
+    kind: str
+    due_date: str | None
+    due_at: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class TasklerqCapture:
+    """Разобранный ответ POST /api/v1/capture или confirm."""
+
+    capture_id: str
+    status: str
+    fallback: bool
+    speech: str
+    items: list[TasklerqCaptureItem]
+    draft_id: str | None
+    expires_at: str | None
+    clarifications: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class TasklerqCaptureCancel:
+    """Разобранный ответ отмены черновика."""
+
+    capture_id: str
+    status: str
+    speech: str
+
+
+@dataclass(frozen=True, slots=True)
+class TasklerqCaptureUndo:
+    """Разобранный ответ отмены последнего capture."""
+
+    capture_id: str | None
+    status: str
+    removed: int
+    speech: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -433,6 +516,60 @@ def _parse_calendar_event(value: Any) -> TasklerqCalendarEvent:
     return event
 
 
+def _parse_capture_item(value: Any) -> TasklerqCaptureItem:
+    """Разобрать элемент ответа capture."""
+    data = _dict_value(value, "capture_item")
+    return TasklerqCaptureItem(
+        id=_optional_string(data, "id", "capture_item"),
+        title=_string(data, "title", "capture_item"),
+        list_id=_optional_string(data, "list_id", "capture_item"),
+        kind=_string(data, "kind", "capture_item"),
+        due_date=_optional_string(data, "due_date", "capture_item"),
+        due_at=_optional_string(data, "due_at", "capture_item"),
+    )
+
+
+def _parse_capture(payload: Any) -> TasklerqCapture:
+    """Разобрать ответ capture или confirm."""
+    data = _dict_value(payload, "capture")
+    clarifications = (
+        _list(data, "clarifications", "capture") if "clarifications" in data else []
+    )
+    return TasklerqCapture(
+        capture_id=_string(data, "capture_id", "capture"),
+        status=_string(data, "status", "capture"),
+        fallback=_bool(data, "fallback", "capture"),
+        speech=_optional_string(data, "speech", "capture") or "",
+        items=[_parse_capture_item(value) for value in _list(data, "items", "capture")],
+        draft_id=_optional_string(data, "draft_id", "capture"),
+        expires_at=_optional_string(data, "expires_at", "capture"),
+        clarifications=[
+            _string_value(value, "capture.clarifications") for value in clarifications
+        ],
+    )
+
+
+def _parse_capture_cancel(payload: Any) -> TasklerqCaptureCancel:
+    """Разобрать ответ отмены черновика."""
+    data = _dict_value(payload, "capture_cancel")
+    return TasklerqCaptureCancel(
+        capture_id=_string(data, "capture_id", "capture_cancel"),
+        status=_string(data, "status", "capture_cancel"),
+        speech=_optional_string(data, "speech", "capture_cancel") or "",
+    )
+
+
+def _parse_capture_undo(payload: Any) -> TasklerqCaptureUndo:
+    """Разобрать ответ отмены последнего capture."""
+    data = _dict_value(payload, "capture_undo")
+    return TasklerqCaptureUndo(
+        capture_id=_optional_string(data, "capture_id", "capture_undo"),
+        status=_string(data, "status", "capture_undo"),
+        removed=_int(data, "removed", "capture_undo"),
+        speech=_optional_string(data, "speech", "capture_undo") or "",
+    )
+
+
 def _parse_snapshot(payload: Any) -> TasklerqSnapshot:
     """Разобрать ответ snapshot, проверив форму всех полей."""
     if not isinstance(payload, dict):
@@ -470,22 +607,26 @@ class TasklerqApiClient:
         *,
         params: dict[str, str] | None = None,
         json: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: aiohttp.ClientTimeout | None = None,
     ) -> Any:
         """Выполнить запрос и вернуть JSON, преобразовав ошибки клиента."""
         session = async_get_clientsession(self._hass)
-        headers = {"Authorization": f"Bearer {self._token}"}
+        request_headers = {"Authorization": f"Bearer {self._token}"}
+        if headers:
+            request_headers.update(headers)
         if json is not None:
-            headers["Content-Type"] = "application/json"
+            request_headers["Content-Type"] = "application/json"
         url = f"{self._url}{path}"
 
         try:
             async with session.request(
                 method,
                 url,
-                headers=headers,
+                headers=request_headers,
                 params=params,
                 json=json,
-                timeout=REQUEST_TIMEOUT,
+                timeout=timeout or REQUEST_TIMEOUT,
             ) as response:
                 if response.status in (200, 201):
                     try:
@@ -530,12 +671,17 @@ class TasklerqApiClient:
         status = response.status
         if message is None and raw_text and 400 <= status < 500:
             message = raw_text[:500]
+        retry_after = None
+        raw_retry_after = response.headers.get("Retry-After")
+        if raw_retry_after is not None and raw_retry_after.strip().isdigit():
+            retry_after = int(raw_retry_after.strip())
         error_class = _ERROR_CLASSES.get(status, TasklerqServerError)
         return error_class(
             message,
             code=code,
             details=details,
             status=status,
+            retry_after=retry_after,
         )
 
     async def _async_get(
@@ -674,3 +820,87 @@ class TasklerqApiClient:
             json=None if version is None else {"version": version},
         )
         return _parse_item(response)
+
+    async def async_capture(
+        self,
+        *,
+        text: str,
+        source: str,
+        mode: str,
+        hint: str | None = None,
+        list_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> TasklerqCapture:
+        """Отправить текст в capture; при сетевой ошибке повторить с тем же ключом."""  # noqa: RUF002
+        body: dict[str, Any] = {"text": text, "source": source, "mode": mode}
+        if hint is not None:
+            body["hint"] = hint
+        if list_id is not None:
+            body["list_id"] = list_id
+        headers: dict[str, str] = {}
+        if idempotency_key:
+            body["idempotency_key"] = idempotency_key
+            headers["Idempotency-Key"] = idempotency_key
+
+        if source == "ha_voice":
+            timeout_seconds = CAPTURE_TIMEOUT_VOICE
+            budget = CAPTURE_RETRY_BUDGET_VOICE
+        else:
+            timeout_seconds = CAPTURE_TIMEOUT_DEFAULT
+            budget = CAPTURE_RETRY_BUDGET_DEFAULT
+
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        network_retries = 0
+        while True:
+            remaining = budget - (loop.time() - started)
+            if remaining <= 0:
+                raise TasklerqConnectionError("Tasklerq capture retry budget exhausted")
+            try:
+                response = await self._async_request(
+                    "POST",
+                    "/api/v1/capture",
+                    json=body,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(
+                        total=min(timeout_seconds, remaining)
+                    ),
+                )
+            except TasklerqConflictError as err:
+                # 409 на capture означает занятый Idempotency-Key: повторяем
+                # тем же ключом и телом, пока ожидание укладывается в бюджет.
+                delay = (
+                    err.retry_after
+                    if err.retry_after is not None
+                    else CAPTURE_DEFAULT_RETRY_AFTER
+                )
+                if delay > budget - (loop.time() - started):
+                    raise
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                continue
+            except TasklerqConnectionError:
+                if network_retries >= CAPTURE_MAX_NETWORK_RETRIES:
+                    raise
+                network_retries += 1
+                continue
+            return _parse_capture(response)
+
+    async def async_confirm_capture(self, capture_id: str) -> TasklerqCapture:
+        """Подтвердить черновик capture."""
+        response = await self._async_request(
+            "POST", f"/api/v1/captures/{capture_id}/confirm"
+        )
+        return _parse_capture(response)
+
+    async def async_cancel_capture(self, capture_id: str) -> TasklerqCaptureCancel:
+        """Отменить черновик capture."""
+        response = await self._async_request(
+            "POST", f"/api/v1/captures/{capture_id}/cancel"
+        )
+        return _parse_capture_cancel(response)
+
+    async def async_undo_last_capture(self) -> TasklerqCaptureUndo:
+        """Отменить последний голосовой capture."""
+        response = await self._async_request("POST", "/api/v1/captures/undo-last")
+        return _parse_capture_undo(response)

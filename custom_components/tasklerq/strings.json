@@ -21,6 +21,78 @@
     "write_failed": {
       "message": "Не удалось сохранить изменения в Tasklerq. Проверьте подключение и повторите попытку."
     },
+    "capture_action_forbidden": {
+      "message": "У токена Tasklerq нет прав на capture: нужен scope capture:write."
+    },
+    "capture_action_reauth": {
+      "message": "Tasklerq: нужна повторная авторизация. Обновите токен интеграции."
+    },
+    "capture_action_unavailable": {
+      "message": "Tasklerq недоступен. Проверьте подключение и повторите попытку."
+    },
+    "capture_ambiguous_entry": {
+      "message": "Несколько подключений Tasklerq. Укажите list_id из списков нужного подключения."
+    },
+    "capture_conflict": {
+      "message": "Tasklerq уже обрабатывает этот capture. Повторите попытку позже. Если задача не появилась, добавьте текст «{text}» снова."
+    },
+    "capture_disabled": {
+      "message": "Capture API в Tasklerq выключен. Текст «{text}» не сохранён."
+    },
+    "capture_failed": {
+      "message": "Не удалось отправить текст «{text}» в Tasklerq. Возможно, он не сохранён: проверьте список и повторите попытку."
+    },
+    "capture_forbidden": {
+      "message": "У токена Tasklerq нет прав на capture: нужен scope capture:write. Текст «{text}» не сохранён."
+    },
+    "capture_invalid": {
+      "message": "Tasklerq отклонил capture{reason}. Текст «{text}» не сохранён."
+    },
+    "capture_llm_unavailable": {
+      "message": "Tasklerq не смог разобрать текст: разбор недоступен. Текст «{text}» не сохранён."
+    },
+    "capture_not_configured": {
+      "message": "Tasklerq не настроен или не загружен. Добавьте интеграцию Tasklerq."
+    },
+    "capture_rate_limited": {
+      "message": "Слишком много запросов capture к Tasklerq. Повторите через {retry_after} сек. Текст «{text}» не сохранён."
+    },
+    "capture_reauth": {
+      "message": "Tasklerq: нужна повторная авторизация. Текст «{text}» не сохранён. Обновите токен интеграции."
+    },
+    "capture_too_long": {
+      "message": "Текст для capture слишком длинный. Текст «{text}» не сохранён."
+    },
+    "capture_unavailable": {
+      "message": "Tasklerq недоступен. Возможно, текст «{text}» не сохранён: проверьте список и повторите попытку."
+    },
+    "cancel_capture_conflict": {
+      "message": "Capture уже применён. Отменить можно только ожидающий черновик."
+    },
+    "cancel_capture_not_found": {
+      "message": "Черновик capture не найден в Tasklerq, либо Capture API выключен."
+    },
+    "confirm_capture_conflict": {
+      "message": "Черновик capture уже отменён или не может быть подтверждён."
+    },
+    "confirm_capture_expired": {
+      "message": "Черновик capture устарел (старше 15 минут). Создайте новый черновик."
+    },
+    "confirm_capture_invalid": {
+      "message": "Tasklerq отклонил элементы черновика{reason}."
+    },
+    "confirm_capture_not_found": {
+      "message": "Черновик capture не найден в Tasklerq, либо Capture API выключен."
+    },
+    "undo_capture_conflict": {
+      "message": "Элементы последнего capture уже изменены или отменены; ничего не удалено."
+    },
+    "undo_capture_disabled": {
+      "message": "Capture API в Tasklerq выключен."
+    },
+    "undo_capture_unavailable": {
+      "message": "Tasklerq недоступен. Не удалось отменить последний capture. Проверьте подключение и повторите попытку."
+    },
     "calendar_too_old": {
       "message": "Tasklerq отдаёт события календаря не дальше чем за 2 года до сегодняшнего дня. Уменьшите период запроса."
     },
