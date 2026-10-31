@@ -1,6 +1,7 @@
 """Асинхронный клиент API Tasklerq."""
 
 import asyncio
+import uuid
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, TypedDict, cast
@@ -602,6 +603,14 @@ def _parse_snapshot(payload: Any) -> TasklerqSnapshot:
     )
 
 
+def _path_uuid(value: str) -> str:
+    """Проверить идентификатор и вернуть канонический UUID для пути."""
+    try:
+        return str(uuid.UUID(value))
+    except ValueError as err:
+        raise TasklerqValidationError("Tasklerq identifier is not a UUID") from err
+
+
 class TasklerqApiClient:
     """Минимальный клиент Tasklerq для config flow и координатора."""
 
@@ -787,7 +796,7 @@ class TasklerqApiClient:
             body["due_at"] = due_at
 
         response = await self._async_request(
-            "POST", f"/api/v1/lists/{list_id}/items", json=body
+            "POST", f"/api/v1/lists/{_path_uuid(list_id)}/items", json=body
         )
         return _parse_item(response)
 
@@ -801,14 +810,14 @@ class TasklerqApiClient:
         """Изменить позицию с оптимистичной блокировкой по version."""  # noqa: RUF002
         response = await self._async_request(
             "PATCH",
-            f"/api/v1/items/{item_id}",
+            f"/api/v1/items/{_path_uuid(item_id)}",
             json={"version": version, **fields},
         )
         return _parse_item(response)
 
     async def async_delete_item(self, item_id: str) -> None:
         """Мягко удалить позицию."""
-        await self._async_request("DELETE", f"/api/v1/items/{item_id}")
+        await self._async_request("DELETE", f"/api/v1/items/{_path_uuid(item_id)}")
 
     async def async_complete_item(
         self, item_id: str, *, version: int | None = None
@@ -816,7 +825,7 @@ class TasklerqApiClient:
         """Завершить позицию, при необходимости проверив version."""
         response = await self._async_request(
             "POST",
-            f"/api/v1/items/{item_id}/complete",
+            f"/api/v1/items/{_path_uuid(item_id)}/complete",
             json=None if version is None else {"version": version},
         )
         return _parse_item(response)
@@ -827,7 +836,7 @@ class TasklerqApiClient:
         """Открыть завершённую позицию, при необходимости проверив version."""
         response = await self._async_request(
             "POST",
-            f"/api/v1/items/{item_id}/reopen",
+            f"/api/v1/items/{_path_uuid(item_id)}/reopen",
             json=None if version is None else {"version": version},
         )
         return _parse_item(response)
@@ -905,14 +914,14 @@ class TasklerqApiClient:
     async def async_confirm_capture(self, capture_id: str) -> TasklerqCapture:
         """Подтвердить черновик capture."""
         response = await self._async_request(
-            "POST", f"/api/v1/captures/{capture_id}/confirm"
+            "POST", f"/api/v1/captures/{_path_uuid(capture_id)}/confirm"
         )
         return _parse_capture(response)
 
     async def async_cancel_capture(self, capture_id: str) -> TasklerqCaptureCancel:
         """Отменить черновик capture."""
         response = await self._async_request(
-            "POST", f"/api/v1/captures/{capture_id}/cancel"
+            "POST", f"/api/v1/captures/{_path_uuid(capture_id)}/cancel"
         )
         return _parse_capture_cancel(response)
 

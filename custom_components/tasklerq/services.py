@@ -46,6 +46,15 @@ _LOGGER = logging.getLogger(__name__)
 
 ServiceHandler = Callable[[ServiceCall], Coroutine[Any, Any, ServiceResponse]]
 
+
+def _uuid_string(value: str) -> str:
+    """Проверить строковый UUID и вернуть каноническую форму."""
+    try:
+        return str(uuid.UUID(value))
+    except ValueError as err:
+        raise vol.Invalid("must be a UUID") from err
+
+
 CAPTURE_SCHEMA = vol.Schema(
     {
         vol.Required("text"): vol.All(str, vol.Length(min=1)),
@@ -54,14 +63,14 @@ CAPTURE_SCHEMA = vol.Schema(
         ),
         vol.Optional("mode", default="auto"): vol.In(["auto", "draft"]),
         vol.Optional("hint"): vol.In(["tasks", "shopping", "checklist"]),
-        vol.Optional("list_id"): vol.All(str, vol.Length(min=1)),
+        vol.Optional("list_id"): vol.All(str, _uuid_string),
         vol.Optional("idempotency_key"): vol.All(
             str, vol.Any("", vol.Match(r"^[!-~]{1,128}$"))
         ),
     }
 )
 
-DRAFT_SCHEMA = vol.Schema({vol.Required("draft_id"): vol.All(str, vol.Length(min=1))})
+DRAFT_SCHEMA = vol.Schema({vol.Required("draft_id"): vol.All(str, _uuid_string)})
 
 EMPTY_SCHEMA = vol.Schema({})
 

@@ -7,6 +7,7 @@ import probatio
 import pytest
 from custom_components.tasklerq import api as api_module
 from custom_components.tasklerq.const import CONF_TOKEN, CONF_URL, DOMAIN
+from custom_components.tasklerq.services import CAPTURE_SCHEMA, DRAFT_SCHEMA
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -38,6 +39,7 @@ UNDO_LAST_URL = f"{BASE_URL}/api/v1/captures/undo-last"
 
 CAPTURE_ID = "019a1b2c-e5f6-7a7b-8c8d-92a3b4c5d6e7"
 ITEM_TITLE = "позвонить маме завтра"
+INJECTION_ID = "../../items/x/complete#"
 
 
 def _capture_item(
@@ -413,6 +415,82 @@ async def test_capture_schema_rejects_invalid_values(
         await _call_capture(hass, {"text": ITEM_TITLE, "idempotency_key": "bad key"})
     with pytest.raises(probatio.Invalid):
         await _call_capture(hass, {"text": ITEM_TITLE, "idempotency_key": "x" * 129})
+
+
+def test_uuid_schemas_canonicalize_identifiers() -> None:
+    """Схемы принимают UUID в разном регистре и приводят его к канону."""  # noqa: RUF002
+    upper_id = CAPTURE_ID.upper()
+
+    assert CAPTURE_SCHEMA({"text": "x", "list_id": upper_id})["list_id"] == CAPTURE_ID
+    assert DRAFT_SCHEMA({"draft_id": upper_id})["draft_id"] == CAPTURE_ID
+
+
+@pytest.mark.parametrize("service", ["confirm_capture", "cancel_capture"])
+@pytest.mark.parametrize("draft_id", [INJECTION_ID, "not-a-uuid"])
+async def test_capture_actions_reject_non_uuid_draft_id(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    service: str,
+    draft_id: str,
+) -> None:
+    """Невалидный draft_id отклоняется схемой до любого запроса к API."""
+    await _setup_entry(hass, aioclient_mock)
+    aioclient_mock.clear_requests()
+
+    with pytest.raises(probatio.Invalid):
+        await hass.services.async_call(
+            DOMAIN,
+            service,
+            {"draft_id": draft_id},
+            blocking=True,
+            return_response=True,
+        )
+
+    assert aioclient_mock.mock_calls == []
+
+
+@pytest.mark.parametrize("list_id", [INJECTION_ID, "not-a-uuid"])
+async def test_capture_rejects_non_uuid_list_id(
+    hass: HomeAssistant, aioclient_mock: Any, list_id: str
+) -> None:
+    """Невалидный list_id отклоняется схемой до любого запроса к API."""
+    await _setup_entry(hass, aioclient_mock)
+    aioclient_mock.clear_requests()
+
+    with pytest.raises(probatio.Invalid):
+        await _call_capture(hass, {"text": ITEM_TITLE, "list_id": list_id})
+
+    assert aioclient_mock.mock_calls == []
+
+
+@pytest.mark.parametrize(
+    ("method_name", "kwargs"),
+    [
+        ("async_create_item", {"title": "x"}),
+        ("async_update_item", {"version": 1, "fields": {"title": "x"}}),
+        ("async_delete_item", {}),
+        ("async_complete_item", {}),
+        ("async_reopen_item", {}),
+        ("async_confirm_capture", {}),
+        ("async_cancel_capture", {}),
+    ],
+)
+@pytest.mark.parametrize("identifier", [INJECTION_ID, ".", "..", "not-a-uuid", ""])
+async def test_client_rejects_non_uuid_ids_before_request(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    method_name: str,
+    kwargs: dict[str, Any],
+    identifier: str,
+) -> None:
+    """Невалидный id отклоняется клиентом до запроса и не меняет путь."""
+    entry = await _setup_entry(hass, aioclient_mock)
+    aioclient_mock.clear_requests()
+
+    with pytest.raises(api_module.TasklerqValidationError):
+        await getattr(entry.runtime_data.client, method_name)(identifier, **kwargs)
+
+    assert aioclient_mock.mock_calls == []
 
 
 async def test_capture_connection_error_retries_once_same_key(
