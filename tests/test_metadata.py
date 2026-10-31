@@ -1,10 +1,17 @@
 """Согласованность manifest и описаний сервисов."""
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 import yaml
+from custom_components.tasklerq.const import (
+    CONF_CALENDAR_DAYS,
+    CONF_SCAN_INTERVAL,
+    CONF_TOKEN,
+    CONF_URL,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 COMPONENT = ROOT / "custom_components" / "tasklerq"
@@ -28,7 +35,7 @@ def test_manifest_required_keys() -> None:
 
     assert manifest["domain"] == "tasklerq"
     assert manifest["name"]
-    assert manifest["version"] == "0.1.0"
+    assert re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", manifest["version"])
     assert manifest["config_flow"] is True
     assert manifest["iot_class"] == "local_polling"
     assert manifest["documentation"] == "https://github.com/StellaLupus/tasklerq-ha"
@@ -67,7 +74,15 @@ def test_translations_have_same_keys() -> None:
     ru = _load_json(COMPONENT / "translations" / "ru.json")
 
     assert _key_tree(strings) == _key_tree(ru)
-    assert set(strings["config"]["step"]["user"]["data"]) == {"url", "token"}
+    assert set(strings["config"]["step"]["user"]["data"]) == {
+        CONF_URL,
+        CONF_TOKEN,
+    }
+    assert set(strings["config"]["step"]["reauth_confirm"]["data"]) == {CONF_TOKEN}
+    assert set(strings["options"]["step"]["init"]["data"]) == {
+        CONF_SCAN_INTERVAL,
+        CONF_CALENDAR_DAYS,
+    }
 
 
 def _key_tree(value: Any) -> Any:

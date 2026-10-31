@@ -3,12 +3,48 @@
     "step": {
       "user": {
         "title": "Подключение к Tasklerq",
-        "description": "Укажите URL сервера Tasklerq и API-токен.",
+        "description": "Укажите URL сервера Tasklerq и API-токен. Токену нужен scope ha:read, а для записи и capture — ha:write и capture:write.",
         "data": {
           "url": "URL Tasklerq",
           "token": "API-токен"
         }
+      },
+      "reauth_confirm": {
+        "title": "Повторная аутентификация",
+        "description": "Старый токен Tasklerq больше не принимается. Введите новый токен для этого household.",
+        "data": {
+          "token": "API-токен"
+        }
       }
+    },
+    "error": {
+      "cannot_connect": "Не удаётся подключиться к Tasklerq. Проверьте URL и доступность сервера.",
+      "invalid_url": "Некорректный URL: укажите адрес http:// или https:// с именем хоста.",
+      "invalid_auth": "Неверный токен",
+      "missing_scope": "У токена нет прав: нужен scope ha:read, а для записи и capture — ha:write и capture:write.",
+      "household_not_found": "Household не найден. Возможно, он был удалён.",
+      "unknown": "Неизвестная ошибка Tasklerq. Проверьте адрес сервера и повторите попытку."
+    },
+    "abort": {
+      "already_configured": "Интеграция для этого household уже настроена.",
+      "wrong_household": "Новый токен принадлежит другому household. Текущая запись не изменена.",
+      "reauth_successful": "Токен Tasklerq обновлён."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Параметры Tasklerq",
+        "description": "Настройте периодичность опроса и горизонт календаря.",
+        "data": {
+          "scan_interval": "Интервал polling, секунды",
+          "calendar_days": "Горизонт календаря, дни"
+        }
+      }
+    },
+    "error": {
+      "invalid_scan_interval": "Интервал polling должен быть от 30 до 300 секунд.",
+      "invalid_calendar_days": "Горизонт календаря должен быть от 7 до 90 дней."
     }
   },
   "services": {
