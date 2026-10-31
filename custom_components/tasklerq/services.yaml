@@ -1,0 +1,74 @@
+capture:
+  name: Захват текста
+  description: Отправить текст в Tasklerq для разбора и создания задач.
+  fields:
+    text:
+      name: Текст
+      description: Фраза для разбора, например «завтра купить молоко».
+      required: true
+      selector:
+        text:
+          multiline: true
+    source:
+      name: Источник
+      description: Источник capture. По умолчанию ha_automation.
+      default: ha_automation
+      selector:
+        select:
+          options:
+            - ha_voice
+            - ha_automation
+    mode:
+      name: Режим
+      description: auto создаёт элементы сразу, draft сохраняет черновик.
+      default: auto
+      selector:
+        select:
+          options:
+            - auto
+            - draft
+    hint:
+      name: Подсказка списка
+      description: Предпочтительный список для разбора.
+      selector:
+        select:
+          options:
+            - tasks
+            - shopping
+            - checklist
+    list_id:
+      name: Идентификатор списка
+      description: Конкретный список Tasklerq для создаваемых элементов.
+      selector:
+        text:
+    idempotency_key:
+      name: Ключ идемпотентности
+      description: Обычно генерируется компонентом; повторный вызов не создаёт дубликат.
+      selector:
+        text:
+
+confirm_capture:
+  name: Подтвердить capture
+  description: Подтвердить черновик capture и создать элементы.
+  fields:
+    draft_id:
+      name: Идентификатор черновика
+      description: Идентификатор черновика, полученный от tasklerq.capture.
+      required: true
+      selector:
+        text:
+
+cancel_capture:
+  name: Отменить capture
+  description: Отменить черновик capture без создания элементов.
+  fields:
+    draft_id:
+      name: Идентификатор черновика
+      description: Идентификатор черновика, полученный от tasklerq.capture.
+      required: true
+      selector:
+        text:
+
+undo_last_capture:
+  name: Отменить последний capture
+  description: Отменить последний голосовой capture за последние 10 минут.

@@ -1,0 +1,71 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Подключение к Tasklerq",
+        "description": "Укажите URL сервера Tasklerq и API-токен.",
+        "data": {
+          "url": "URL Tasklerq",
+          "token": "API-токен"
+        }
+      }
+    }
+  },
+  "services": {
+    "capture": {
+      "name": "Захват текста",
+      "description": "Отправить текст в Tasklerq для разбора и создания задач.",
+      "fields": {
+        "text": {
+          "name": "Текст",
+          "description": "Фраза для разбора, например «завтра купить молоко»."
+        },
+        "source": {
+          "name": "Источник",
+          "description": "Источник capture. По умолчанию ha_automation."
+        },
+        "mode": {
+          "name": "Режим",
+          "description": "auto создаёт элементы сразу, draft сохраняет черновик."
+        },
+        "hint": {
+          "name": "Подсказка списка",
+          "description": "Предпочтительный список для разбора."
+        },
+        "list_id": {
+          "name": "Идентификатор списка",
+          "description": "Конкретный список Tasklerq для создаваемых элементов."
+        },
+        "idempotency_key": {
+          "name": "Ключ идемпотентности",
+          "description": "Обычно генерируется компонентом; повторный вызов не создаёт дубликат."
+        }
+      }
+    },
+    "confirm_capture": {
+      "name": "Подтвердить capture",
+      "description": "Подтвердить черновик capture и создать элементы.",
+      "fields": {
+        "draft_id": {
+          "name": "Идентификатор черновика",
+          "description": "Идентификатор черновика, полученный от tasklerq.capture."
+        }
+      }
+    },
+    "cancel_capture": {
+      "name": "Отменить capture",
+      "description": "Отменить черновик capture без создания элементов.",
+      "fields": {
+        "draft_id": {
+          "name": "Идентификатор черновика",
+          "description": "Идентификатор черновика, полученный от tasklerq.capture."
+        }
+      }
+    },
+    "undo_last_capture": {
+      "name": "Отменить последний capture",
+      "description": "Отменить последний голосовой capture за последние 10 минут.",
+      "fields": {}
+    }
+  }
+}
