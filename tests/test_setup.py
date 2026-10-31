@@ -221,3 +221,25 @@ async def test_setup_server_error_schedules_retry(
         assert not hass.services.has_service(DOMAIN, service)
 
     entry.async_cancel_retry_setup()
+
+
+async def test_invalid_household_timezone_logs_warning(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Невалидная IANA timezone household не подменяется молча."""
+    aioclient_mock.get(
+        HOUSEHOLD_URL,
+        json=household_payload(timezone="Mars/Olympus"),
+    )
+    aioclient_mock.get(SNAPSHOT_URL, json=snapshot_payload())
+    entry = _mock_entry()
+    entry.add_to_hass(hass)
+
+    with caplog.at_level(logging.WARNING, logger="custom_components.tasklerq"):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert "Mars/Olympus" in caplog.text

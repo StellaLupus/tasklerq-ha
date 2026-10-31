@@ -2,6 +2,7 @@
 
 from typing import Any
 
+import aiohttp
 import pytest
 from custom_components.tasklerq.api import (
     TasklerqApiClient,
@@ -11,7 +12,7 @@ from custom_components.tasklerq.api import (
 )
 from custom_components.tasklerq.const import CONF_TOKEN, CONF_URL, DOMAIN
 from custom_components.tasklerq.coordinator import TasklerqCoordinator
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
@@ -768,6 +769,48 @@ async def test_partial_update_failure_still_refreshes(
     assert len(_calls(aioclient_mock, "get", "/api/v1/snapshot")) > snapshot_calls
 
 
+async def test_partial_update_conflict_refreshes_once(
+    hass: HomeAssistant, aioclient_mock: Any
+) -> None:
+    """409 на втором шаге делает один refresh, а не два подряд."""  # noqa: RUF002
+    await _setup_entry(
+        hass,
+        aioclient_mock,
+        items=[item_payload(ITEM_ID, title="Старое", status="open", version=2)],
+    )
+    aioclient_mock.patch(
+        ITEM_URL,
+        json=item_payload(ITEM_ID, title="Новое", version=3),
+    )
+    aioclient_mock.post(
+        COMPLETE_URL,
+        status=409,
+        json={
+            "error": {
+                "code": "conflict",
+                "message": "Task was modified",
+                "details": {"current_version": 4},
+            }
+        },
+    )
+    snapshot_calls = len(_calls(aioclient_mock, "get", "/api/v1/snapshot"))
+
+    with pytest.raises(HomeAssistantError, match="изменена в Tasklerq"):
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            {
+                "entity_id": "todo.zadachi",
+                "item": ITEM_ID,
+                "rename": "Новое",
+                "status": "completed",
+            },
+            blocking=True,
+        )
+
+    assert len(_calls(aioclient_mock, "get", "/api/v1/snapshot")) == snapshot_calls + 1
+
+
 async def test_partial_delete_failure_still_refreshes(
     hass: HomeAssistant, aioclient_mock: Any
 ) -> None:
@@ -1066,3 +1109,250 @@ async def test_full_sync_refreshes_member_names(
         _entity_state(hass, "todo.zadachi").attributes["tasklerq_items"][0]["assignee"]
         == "Алексей Петров"
     )
+
+
+async def test_conflict_refreshes_and_does_not_retry(
+    hass: HomeAssistant, aioclient_mock: Any
+) -> None:
+    """409 обновляет координатор, но не повторяет PATCH с новой версией."""  # noqa: RUF002
+    await _setup_entry(
+        hass,
+        aioclient_mock,
+        items=[item_payload(ITEM_ID, title="Старое", version=2)],
+    )
+    aioclient_mock.patch(
+        ITEM_URL,
+        status=409,
+        json={
+            "error": {
+                "code": "conflict",
+                "message": "Task was modified",
+                "details": {"current_version": 4},
+            }
+        },
+    )
+    snapshot_calls = len(_calls(aioclient_mock, "get", "/api/v1/snapshot"))
+
+    with pytest.raises(HomeAssistantError, match="изменена в Tasklerq"):
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            {"entity_id": "todo.zadachi", "item": ITEM_ID, "rename": "Новое"},
+            blocking=True,
+        )
+
+    assert len(_calls(aioclient_mock, "patch", f"/api/v1/items/{ITEM_ID}")) == 1
+    assert len(_calls(aioclient_mock, "get", "/api/v1/snapshot")) == snapshot_calls + 1
+
+
+@pytest.mark.parametrize(
+    ("response", "reason"),
+    [
+        (
+            {
+                "status": 422,
+                "json": {
+                    "error": {
+                        "code": "validation_error",
+                        "message": "Invalid title",
+                        "details": {},
+                    }
+                },
+            },
+            "Invalid title",
+        ),
+        (
+            {"status": 422, "text": "title must not be empty"},
+            "title must not be empty",
+        ),
+    ],
+)
+async def test_create_validation_error_includes_reason(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    response: dict[str, Any],
+    reason: str,
+) -> None:
+    """422 с конвертом и без конверта показывает причину и не создаёт позицию."""  # noqa: RUF002
+    await _setup_entry(hass, aioclient_mock, items=[])
+    aioclient_mock.post(ITEMS_URL, **response)
+    before = _entity_state(hass, "todo.zadachi").attributes["tasklerq_items"]
+
+    with pytest.raises(HomeAssistantError, match=reason) as raised:
+        await hass.services.async_call(
+            "todo",
+            "add_item",
+            {"entity_id": "todo.zadachi", "item": "Новая задача"},
+            blocking=True,
+        )
+
+    assert raised.value.translation_key == "validation_error"
+    assert raised.value.translation_placeholders is not None
+    assert reason in raised.value.translation_placeholders["reason"]
+    assert _entity_state(hass, "todo.zadachi").attributes["tasklerq_items"] == before
+
+
+async def test_permission_error_keeps_entities_available(
+    hass: HomeAssistant, aioclient_mock: Any
+) -> None:
+    """403 при создании даёт ошибку прав, не помечая сущности недоступными."""
+    entry = await _setup_entry(hass, aioclient_mock, items=[])
+    aioclient_mock.post(
+        ITEMS_URL,
+        status=403,
+        json={"error": {"code": "forbidden", "message": "Missing scope"}},
+    )
+
+    with pytest.raises(HomeAssistantError, match="прав"):
+        await hass.services.async_call(
+            "todo",
+            "add_item",
+            {"entity_id": "todo.zadachi", "item": "Новая задача"},
+            blocking=True,
+        )
+
+    assert _coordinator(entry).last_update_success
+    assert _entity_state(hass, "todo.zadachi").state != "unavailable"
+    assert _entity_state(hass, "calendar.tasklerq").state != "unavailable"
+
+
+async def test_write_auth_error_starts_reauth(
+    hass: HomeAssistant, aioclient_mock: Any
+) -> None:
+    """401 при записи запускает reauth и просит повторить авторизацию."""
+    await _setup_entry(hass, aioclient_mock, items=[])
+    aioclient_mock.post(ITEMS_URL, status=401, json={})
+
+    with pytest.raises(HomeAssistantError, match="повторная авторизация"):
+        await hass.services.async_call(
+            "todo",
+            "add_item",
+            {"entity_id": "todo.zadachi", "item": "Новая задача"},
+            blocking=True,
+        )
+    await hass.async_block_till_done()
+
+    flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert any(flow["context"]["source"] == SOURCE_REAUTH for flow in flows)
+
+
+@pytest.mark.parametrize(
+    ("method", "url", "service", "service_data"),
+    [
+        ("patch", ITEM_URL, "update_item", {"item": ITEM_ID, "rename": "Новое"}),
+        (
+            "post",
+            COMPLETE_URL,
+            "update_item",
+            {"item": ITEM_ID, "status": "completed"},
+        ),
+        ("delete", ITEM_URL, "remove_item", {"item": [ITEM_ID]}),
+    ],
+)
+async def test_auth_error_on_other_item_writes_starts_reauth(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    method: str,
+    url: str,
+    service: str,
+    service_data: dict[str, Any],
+) -> None:
+    """401 на update/complete/delete запускает reauth так же, как create."""
+    await _setup_entry(
+        hass,
+        aioclient_mock,
+        items=[item_payload(ITEM_ID, status="open", version=2)],
+    )
+    getattr(aioclient_mock, method)(url, status=401, json={})
+
+    with pytest.raises(HomeAssistantError, match="повторная авторизация"):
+        await hass.services.async_call(
+            "todo",
+            service,
+            {"entity_id": "todo.zadachi", **service_data},
+            blocking=True,
+        )
+    await hass.async_block_till_done()
+
+    flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert any(flow["context"]["source"] == SOURCE_REAUTH for flow in flows)
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {
+            "status": 500,
+            "json": {"error": {"code": "internal_error", "message": "Boom"}},
+        },
+        {"exc": aiohttp.ClientConnectionError()},
+    ],
+)
+async def test_write_unavailable_error(
+    hass: HomeAssistant, aioclient_mock: Any, response: dict[str, Any]
+) -> None:
+    """5xx и отсутствие связи при записи дают понятную ошибку недоступности."""
+    await _setup_entry(hass, aioclient_mock, items=[])
+    aioclient_mock.post(ITEMS_URL, **response)
+
+    with pytest.raises(HomeAssistantError, match="Tasklerq недоступен"):
+        await hass.services.async_call(
+            "todo",
+            "add_item",
+            {"entity_id": "todo.zadachi", "item": "Новая задача"},
+            blocking=True,
+        )
+
+
+async def test_bad_request_shows_reason_not_unavailable(
+    hass: HomeAssistant, aioclient_mock: Any
+) -> None:
+    """400 с текстовым телом показывает причину, а не «Tasklerq недоступен»."""  # noqa: RUF002
+    await _setup_entry(hass, aioclient_mock, items=[])
+    aioclient_mock.post(ITEMS_URL, status=400, text="Json body is invalid")
+
+    with pytest.raises(HomeAssistantError, match="Json body is invalid") as raised:
+        await hass.services.async_call(
+            "todo",
+            "add_item",
+            {"entity_id": "todo.zadachi", "item": "Новая задача"},
+            blocking=True,
+        )
+
+    assert "недоступен" not in str(raised.value)
+
+
+async def test_not_found_refreshes_and_does_not_resurrect(
+    hass: HomeAssistant, aioclient_mock: Any
+) -> None:
+    """404 обновляет координатор и не пытается восстановить удалённую позицию."""
+    entry = await _setup_entry(
+        hass,
+        aioclient_mock,
+        items=[item_payload(ITEM_ID, title="Удалённая", version=2)],
+    )
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(
+        SNAPSHOT_URL,
+        json=snapshot_payload(
+            lists=[list_payload(LIST_ID)],
+            items=[],
+            deleted_item_ids=[ITEM_ID],
+        ),
+    )
+    aioclient_mock.patch(
+        ITEM_URL,
+        status=404,
+        json={"error": {"code": "not_found", "message": "Item not found"}},
+    )
+
+    with pytest.raises(HomeAssistantError, match="не найден"):
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            {"entity_id": "todo.zadachi", "item": ITEM_ID, "rename": "Новое"},
+            blocking=True,
+        )
+
+    assert ITEM_ID not in _coordinator(entry).data.items
+    assert len(_calls(aioclient_mock, "patch", f"/api/v1/items/{ITEM_ID}")) == 1

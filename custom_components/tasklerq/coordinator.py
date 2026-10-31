@@ -25,13 +25,13 @@ from .api import (
     TasklerqValidationError,
 )
 from .const import (
+    BACKOFF_INITIAL_SECONDS,
+    BACKOFF_MAX_SECONDS,
     CONF_CALENDAR_DAYS,
     CONF_SCAN_INTERVAL,
     DEFAULT_CALENDAR_DAYS,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
-    MAX_SCAN_INTERVAL,
-    MIN_SCAN_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -82,8 +82,11 @@ class TasklerqCoordinator(DataUpdateCoordinator[TasklerqData]):
         self._scan_interval = scan_interval
         self._calendar_days = calendar_days
         self._members = dict(members or {})
-        self._backoff_seconds = MIN_SCAN_INTERVAL
+        self._backoff_seconds = BACKOFF_INITIAL_SECONDS
         self._last_full_sync: datetime | None = None
+        self._last_successful_sync: datetime | None = None
+        self._last_error_code: str | None = None
+        self._last_error_at: datetime | None = None
 
     @property
     def client(self) -> TasklerqApiClient:
@@ -96,12 +99,47 @@ class TasklerqCoordinator(DataUpdateCoordinator[TasklerqData]):
         return self._timezone
 
     @property
+    def scan_interval(self) -> int:
+        """Интервал polling из options."""
+        return self._scan_interval
+
+    @property
+    def calendar_days(self) -> int:
+        """Горизонт календаря из options."""
+        return self._calendar_days
+
+    @property
+    def last_successful_sync(self) -> datetime | None:
+        """Время последней успешной синхронизации."""
+        return self._last_successful_sync
+
+    @property
+    def last_error_code(self) -> str | None:
+        """Код последней ошибки синхронизации без тела ответа."""
+        return self._last_error_code
+
+    @property
+    def last_error_at(self) -> datetime | None:
+        """Время последней ошибки синхронизации."""
+        return self._last_error_at
+
+    @property
     def calendar_horizon_end(self) -> date:
         """Исключающий конец горизонта календаря из options."""
         today = dt_util.now(self._timezone).date()
         return today + timedelta(days=self._calendar_days)
 
     async def _async_update_data(self) -> TasklerqData:
+        """Запросить снапшот и запомнить результат или код ошибки."""
+        try:
+            data = await self._async_update_data_inner()
+        except Exception as err:
+            self._record_sync_error(err)
+            raise
+        self._last_successful_sync = dt_util.utcnow()
+        return data
+
+    async def _async_update_data_inner(self) -> TasklerqData:
         """Запросить снапшот и применить его к локальному состоянию."""  # noqa: RUF002
         now = dt_util.utcnow()
         full_sync = (
@@ -207,15 +245,26 @@ class TasklerqCoordinator(DataUpdateCoordinator[TasklerqData]):
         today = dt_util.now(self._timezone).date()
         return (today + timedelta(days=self._calendar_days)).isoformat()
 
+    def _record_sync_error(self, err: BaseException) -> None:
+        """Запомнить только код и время ошибки, без текста ответа сервера."""
+        cause = err.__cause__
+        source = cause if isinstance(cause, TasklerqApiError) else err
+        if isinstance(source, TasklerqApiError) and source.status is not None:
+            code = str(source.status)
+        else:
+            code = source.__class__.__name__
+        self._last_error_code = code
+        self._last_error_at = dt_util.utcnow()
+
     def _apply_backoff(self) -> None:
         """Увеличить интервал следующего опроса в пределах 30…300 секунд."""
         seconds = self._backoff_seconds
-        self._backoff_seconds = min(MAX_SCAN_INTERVAL, seconds * 2)
+        self._backoff_seconds = min(BACKOFF_MAX_SECONDS, seconds * 2)
         self.update_interval = timedelta(seconds=seconds)
 
     def _reset_interval(self) -> None:
         """Вернуть интервал из options после успешного обновления."""
-        self._backoff_seconds = MIN_SCAN_INTERVAL
+        self._backoff_seconds = BACKOFF_INITIAL_SECONDS
         self.update_interval = timedelta(seconds=self._scan_interval)
 
 

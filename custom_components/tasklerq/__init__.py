@@ -82,8 +82,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: TasklerqConfigEntry) -> 
 
     timezone_name = household.get("timezone")
     if not isinstance(timezone_name, str) or not timezone_name:
+        _LOGGER.warning(
+            "Tasklerq household has no timezone; using Home Assistant timezone %s",
+            hass.config.time_zone,
+        )
         timezone_name = hass.config.time_zone
     resolved_timezone = await async_get_time_zone(timezone_name)
+    if resolved_timezone is None:
+        _LOGGER.warning(
+            "Tasklerq household timezone %r is invalid; "
+            "using Home Assistant timezone %s",
+            timezone_name,
+            hass.config.time_zone,
+        )
+        timezone_name = hass.config.time_zone
+        resolved_timezone = await async_get_time_zone(timezone_name)
     timezone: tzinfo = (
         resolved_timezone
         if resolved_timezone is not None

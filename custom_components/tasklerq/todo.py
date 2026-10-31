@@ -24,10 +24,12 @@ from .api import (
     TasklerqApiError,
     TasklerqAuthenticationError,
     TasklerqConflictError,
+    TasklerqConnectionError,
     TasklerqItem,
     TasklerqList,
     TasklerqNotFoundError,
     TasklerqPermissionError,
+    TasklerqServerError,
     TasklerqValidationError,
 )
 from .const import DOMAIN
@@ -50,28 +52,71 @@ def _unique_id(household_id: str, list_id: str) -> str:
     return f"{DOMAIN}:{household_id}:{list_id}"
 
 
+def _validation_reason(err: TasklerqApiError) -> str:
+    """Причина отказа из сообщения клиента или простых полей details."""
+    if err.message:
+        return err.message
+    return "; ".join(
+        f"{key}: {value}"
+        for key, value in err.details.items()
+        if isinstance(value, (str, int, float, bool))
+    )
+
+
+def _validation_error(err: TasklerqApiError) -> HomeAssistantError:
+    """Ошибка отклонённого запроса с причиной в тексте и переводе."""  # noqa: RUF002
+    reason = _validation_reason(err)
+    reason_text = f": {reason}" if reason else ""
+    return HomeAssistantError(
+        f"Tasklerq отклонил изменения задачи{reason_text}",
+        translation_domain=DOMAIN,
+        translation_key="validation_error",
+        translation_placeholders={"reason": reason_text},
+    )
+
+
 def _write_error(err: TasklerqApiError) -> HomeAssistantError:
     """Русская ошибка записи по типу ответа клиента."""
     if isinstance(err, TasklerqConflictError):
         return HomeAssistantError(
-            "Tasklerq: задача уже изменена. Обновите список и повторите действие."
+            "Tasklerq: позиция уже изменена в Tasklerq. Обновите и повторите действие.",
+            translation_domain=DOMAIN,
+            translation_key="conflict",
         )
     if isinstance(err, TasklerqAuthenticationError):
-        return HomeAssistantError("Tasklerq отклонил токен. Обновите токен интеграции.")
+        return HomeAssistantError(
+            "Tasklerq: нужна повторная авторизация. Обновите токен интеграции.",
+            translation_domain=DOMAIN,
+            translation_key="reauth_required",
+        )
     if isinstance(err, TasklerqPermissionError):
         return HomeAssistantError(
-            "У токена Tasklerq нет прав на запись: нужен scope ha:write."  # noqa: RUF001
+            "У токена Tasklerq нет прав на запись: нужен scope ha:write.",  # noqa: RUF001
+            translation_domain=DOMAIN,
+            translation_key="write_forbidden",
         )
     if isinstance(err, TasklerqNotFoundError):
         return HomeAssistantError(
-            "Список или задача не найдены в Tasklerq. Обновите список."
+            "Список или задача не найдены в Tasklerq. "
+            "Возможно, они удалены; список обновлён.",
+            translation_domain=DOMAIN,
+            translation_key="not_found",
         )
     if isinstance(err, TasklerqValidationError):
-        reason = f": {err.message}" if err.message else ""
-        return HomeAssistantError(f"Tasklerq отклонил изменения задачи{reason}")
+        return _validation_error(err)
+    if err.status is not None and 400 <= err.status < 500:
+        return _validation_error(err)
+    if isinstance(err, (TasklerqConnectionError, TasklerqServerError)):
+        return HomeAssistantError(
+            "Tasklerq недоступен. Проверьте подключение и повторите попытку.",
+            translation_domain=DOMAIN,
+            translation_key="unavailable",
+        )
     return HomeAssistantError(
         "Не удалось сохранить изменения в Tasklerq. "  # noqa: RUF001
-        "Проверьте подключение и повторите попытку."
+        "Проверьте подключение и повторите попытку.",
+        translation_domain=DOMAIN,
+        translation_key="write_failed",
     )
 
 
@@ -231,12 +276,26 @@ class TasklerqTodoListEntity(TodoListEntity):
             )
         return item
 
-    async def _async_run_write(self, awaitable: Awaitable[_T]) -> _T:
+    async def _async_run_write(
+        self, awaitable: Awaitable[_T], *, refresh_on_error: bool = True
+    ) -> _T:
         """Выполнить запись, превратив ошибку клиента в HomeAssistantError."""
         try:
             return await awaitable
         except TasklerqApiError as err:
+            await self._async_handle_write_error(err, refresh=refresh_on_error)
             raise _write_error(err) from err
+
+    async def _async_handle_write_error(
+        self, err: TasklerqApiError, *, refresh: bool
+    ) -> None:
+        """Обновить состояние или запустить reauth перед показом ошибки."""
+        if refresh and isinstance(err, (TasklerqConflictError, TasklerqNotFoundError)):
+            await self._coordinator.async_refresh()
+        elif isinstance(err, TasklerqAuthenticationError):
+            entry = self._coordinator.config_entry
+            if entry is not None:
+                entry.async_start_reauth(self._coordinator.hass)
 
     async def _async_refresh(self) -> None:
         """Принудительно обновить координатор после успешной записи."""
@@ -304,15 +363,20 @@ class TasklerqTodoListEntity(TodoListEntity):
                 version = updated["version"]
 
             if status_changed:
+                refresh_on_error = not wrote
                 if item.status == TodoItemStatus.COMPLETED:
                     await self._async_run_write(
                         self._coordinator.client.async_complete_item(
                             uid, version=version
-                        )
+                        ),
+                        refresh_on_error=refresh_on_error,
                     )
                 else:
                     await self._async_run_write(
-                        self._coordinator.client.async_reopen_item(uid, version=version)
+                        self._coordinator.client.async_reopen_item(
+                            uid, version=version
+                        ),
+                        refresh_on_error=refresh_on_error,
                     )
                 wrote = True
         finally:
@@ -325,7 +389,8 @@ class TasklerqTodoListEntity(TodoListEntity):
         try:
             for uid in uids:
                 await self._async_run_write(
-                    self._coordinator.client.async_delete_item(uid)
+                    self._coordinator.client.async_delete_item(uid),
+                    refresh_on_error=not wrote,
                 )
                 wrote = True
         finally:

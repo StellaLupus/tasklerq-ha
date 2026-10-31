@@ -1,15 +1,16 @@
 """Календарная сущность Tasklerq: события, горизонт и read-only."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
+from custom_components.tasklerq.api import TasklerqApiClient, TasklerqServerError
 from custom_components.tasklerq.const import CONF_TOKEN, CONF_URL, DOMAIN
 from custom_components.tasklerq.coordinator import TasklerqCoordinator
 from homeassistant.components.calendar import CalendarEntity
 from homeassistant.components.calendar.const import DATA_COMPONENT
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
@@ -394,6 +395,28 @@ async def test_calendar_api_422_raises_home_assistant_error(
         )
 
 
+async def test_calendar_api_auth_error_starts_reauth(
+    hass: HomeAssistant, aioclient_mock: Any, freezer: Any
+) -> None:
+    """401 при запросе прошлого через /calendar запускает reauth."""
+    await hass.config.async_set_time_zone("Europe/Moscow")
+    freezer.move_to("2026-11-10T12:00:00+00:00")
+    await _setup_entry(hass, aioclient_mock, items=[], calendar_events=[])
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(CALENDAR_URL, status=401, json={})
+
+    with pytest.raises(HomeAssistantError, match="повторная авторизация"):
+        await _calendar_entity(hass).async_get_events(
+            hass,
+            datetime(2026, 11, 3, tzinfo=MOSCOW),
+            datetime(2026, 11, 10, tzinfo=MOSCOW),
+        )
+    await hass.async_block_till_done()
+
+    flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert any(flow["context"]["source"] == SOURCE_REAUTH for flow in flows)
+
+
 async def test_description_comes_from_item_notes(
     hass: HomeAssistant, aioclient_mock: Any, freezer: Any
 ) -> None:
@@ -417,7 +440,7 @@ async def test_description_comes_from_item_notes(
     )
 
     assert events[0].description == "Из заметки"
-    assert events[1].description in (None, "")
+    assert events[1].description is None
 
 
 async def test_state_is_on_during_timed_event(
@@ -498,3 +521,182 @@ async def test_entity_unique_id_and_registry(
     assert registry_entry is not None
     assert registry_entry.unique_id == f"tasklerq:{HOUSEHOLD_ID}:calendar"
     assert registry_entry.domain == "calendar"
+
+
+async def test_interval_crossing_today_merges_past_and_future(
+    hass: HomeAssistant, aioclient_mock: Any, freezer: Any
+) -> None:
+    """Прошлое берётся из API, будущее из снапшота, события идут по порядку."""
+    await hass.config.async_set_time_zone("Europe/Moscow")
+    freezer.move_to("2026-11-10T12:00:00+00:00")
+    await _setup_entry(
+        hass,
+        aioclient_mock,
+        items=[],
+        calendar_events=[
+            calendar_event_payload(
+                ITEM_ID,
+                occurrence_key=f"{ITEM_ID}:2026-11-12",
+                start="2026-11-12",
+                end="2026-11-13",
+                title="Будущая",
+            )
+        ],
+    )
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(
+        CALENDAR_URL,
+        json={
+            "events": [
+                calendar_event_payload(
+                    SECOND_ITEM_ID,
+                    occurrence_key=f"{SECOND_ITEM_ID}:2026-11-05",
+                    start="2026-11-05",
+                    end="2026-11-06",
+                    title="Прошлая",
+                )
+            ]
+        },
+    )
+
+    events = await _calendar_entity(hass).async_get_events(
+        hass,
+        datetime(2026, 11, 3, tzinfo=MOSCOW),
+        datetime(2026, 11, 15, tzinfo=MOSCOW),
+    )
+
+    calls = _calls(aioclient_mock, "/api/v1/calendar")
+    assert [_query(call) for call in calls] == [
+        {"start": "2026-11-03", "end": "2026-11-10"}
+    ]
+    assert [event.summary for event in events] == ["Прошлая", "Будущая"]
+
+
+async def test_past_interval_older_than_two_years_is_rejected(
+    hass: HomeAssistant, aioclient_mock: Any, freezer: Any
+) -> None:
+    """Слишком старое прошлое не превращается в длинную серию запросов к API."""
+    await hass.config.async_set_time_zone("Europe/Moscow")
+    freezer.move_to("2026-11-10T12:00:00+00:00")
+    await _setup_entry(hass, aioclient_mock, items=[], calendar_events=[])
+    aioclient_mock.clear_requests()
+
+    with pytest.raises(HomeAssistantError, match="2 года"):
+        await _calendar_entity(hass).async_get_events(
+            hass,
+            datetime(2024, 1, 1, tzinfo=MOSCOW),
+            datetime(2026, 11, 10, tzinfo=MOSCOW),
+        )
+
+    assert _calls(aioclient_mock, "/api/v1/calendar") == []
+
+
+@pytest.mark.parametrize(
+    ("today", "start", "allowed"),
+    [
+        ("2026-11-10", "2024-11-10", True),
+        ("2026-11-10", "2024-11-09", False),
+        ("2028-02-29", "2026-02-28", True),
+        ("2028-02-29", "2026-02-27", False),
+    ],
+)
+async def test_past_interval_two_year_boundary(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    freezer: Any,
+    today: str,
+    start: str,
+    allowed: bool,
+) -> None:
+    """Ровно два календарных года допустимы, на день раньше — уже нет."""
+    await hass.config.async_set_time_zone("Europe/Moscow")
+    freezer.move_to(f"{today}T12:00:00+00:00")
+    await _setup_entry(hass, aioclient_mock, items=[], calendar_events=[])
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(CALENDAR_URL, json={"events": []})
+
+    start_at = datetime.fromisoformat(start).replace(tzinfo=MOSCOW)
+    end_at = datetime.fromisoformat(today).replace(tzinfo=MOSCOW) + timedelta(days=1)
+    if allowed:
+        events = await _calendar_entity(hass).async_get_events(hass, start_at, end_at)
+        assert events == []
+    else:
+        with pytest.raises(HomeAssistantError, match="2 года"):
+            await _calendar_entity(hass).async_get_events(hass, start_at, end_at)
+        assert _calls(aioclient_mock, "/api/v1/calendar") == []
+
+
+async def test_truncated_warning_repeats_after_flag_cycles(
+    hass: HomeAssistant, aioclient_mock: Any, freezer: Any, caplog: Any
+) -> None:
+    """Предупреждение снова появляется после true → false → true."""
+    await hass.config.async_set_time_zone("Europe/Moscow")
+    freezer.move_to("2026-11-03T12:00:00+00:00")
+    caplog.set_level("WARNING", logger="custom_components.tasklerq.calendar")
+    entry = await _setup_entry(
+        hass,
+        aioclient_mock,
+        items=[],
+        calendar_events=[],
+        calendar_truncated=True,
+    )
+
+    for truncated in (True, False, True):
+        aioclient_mock.clear_requests()
+        aioclient_mock.get(
+            SNAPSHOT_URL,
+            json=snapshot_payload(
+                lists=[list_payload(LIST_ID)],
+                items=[],
+                calendar_events=[],
+                calendar_truncated=truncated,
+            ),
+        )
+        await _coordinator(entry).async_refresh()
+        await hass.async_block_till_done()
+
+    warnings = [
+        record
+        for record in caplog.records
+        if record.name == "custom_components.tasklerq.calendar"
+        and "truncat" in record.message.lower()
+    ]
+    assert len(warnings) == 2
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "all_day"),
+    [
+        ("not-a-date", "2026-11-06", True),
+        ("not-a-date", "2026-11-06", False),
+        ("2026-11-05T99:00:00Z", "2026-11-05T10:00:00Z", False),
+        ("2026-11-05T10:00:00", "2026-11-05T11:00:00", False),
+        ("2026-11-05T11:00:00Z", "2026-11-05T10:00:00Z", False),
+        ("2026-11-06", "2026-11-05", True),
+    ],
+)
+async def test_invalid_calendar_event_dates_are_client_errors(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    start: str,
+    end: str,
+    all_day: bool,
+) -> None:
+    """Неверные даты события отклоняются при разборе ответа в api.py."""
+    aioclient_mock.get(
+        SNAPSHOT_URL,
+        json=snapshot_payload(
+            calendar_events=[
+                calendar_event_payload(
+                    ITEM_ID,
+                    start=start,
+                    end=end,
+                    all_day=all_day,
+                )
+            ]
+        ),
+    )
+    client = TasklerqApiClient(hass, BASE_URL, TOKEN)
+
+    with pytest.raises(TasklerqServerError):
+        await client.async_get_snapshot()

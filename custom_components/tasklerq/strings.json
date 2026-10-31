@@ -1,4 +1,42 @@
 {
+  "exceptions": {
+    "conflict": {
+      "message": "Tasklerq: позиция уже изменена в Tasklerq. Обновите и повторите действие."
+    },
+    "reauth_required": {
+      "message": "Tasklerq: нужна повторная авторизация. Обновите токен интеграции."
+    },
+    "write_forbidden": {
+      "message": "У токена Tasklerq нет прав на запись: нужен scope ha:write."
+    },
+    "not_found": {
+      "message": "Список или задача не найдены в Tasklerq. Возможно, они удалены; список обновлён."
+    },
+    "validation_error": {
+      "message": "Tasklerq отклонил изменения задачи{reason}."
+    },
+    "unavailable": {
+      "message": "Tasklerq недоступен. Проверьте подключение и повторите попытку."
+    },
+    "write_failed": {
+      "message": "Не удалось сохранить изменения в Tasklerq. Проверьте подключение и повторите попытку."
+    },
+    "calendar_too_old": {
+      "message": "Tasklerq отдаёт события календаря не дальше чем за 2 года до сегодняшнего дня. Уменьшите период запроса."
+    },
+    "calendar_rejected": {
+      "message": "Tasklerq не смог отдать календарь: слишком большой период или больше 1000 вхождений. Уменьшите период."
+    },
+    "calendar_forbidden": {
+      "message": "У токена Tasklerq нет прав на чтение календаря: нужен scope ha:read."
+    },
+    "calendar_unavailable": {
+      "message": "Не удалось подключиться к Tasklerq для загрузки календаря. Проверьте подключение и повторите попытку."
+    },
+    "calendar_failed": {
+      "message": "Не удалось загрузить события календаря Tasklerq. Проверьте подключение и повторите попытку."
+    }
+  },
   "config": {
     "step": {
       "user": {

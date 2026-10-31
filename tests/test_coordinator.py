@@ -15,6 +15,7 @@ from custom_components.tasklerq.const import (
 )
 from custom_components.tasklerq.coordinator import TasklerqCoordinator
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
+from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -359,6 +360,33 @@ async def test_backoff_and_recovery(hass: HomeAssistant, aioclient_mock: Any) ->
     assert coordinator.data.items[ITEM_ID]["title"] == "Recovered"
 
 
+async def test_backoff_constants_are_independent_of_options_bounds(
+    hass: HomeAssistant, aioclient_mock: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Backoff берёт свои константы, а не MIN/MAX_SCAN_INTERVAL."""  # noqa: RUF002
+    monkeypatch.setattr(
+        "custom_components.tasklerq.coordinator.BACKOFF_INITIAL_SECONDS", 35
+    )
+    monkeypatch.setattr(
+        "custom_components.tasklerq.coordinator.BACKOFF_MAX_SECONDS", 310
+    )
+    entry = await _setup_entry(
+        hass,
+        aioclient_mock,
+        options={CONF_SCAN_INTERVAL: 90, CONF_CALENDAR_DAYS: 30},
+    )
+    coordinator = _coordinator(entry)
+
+    for expected_seconds in (35, 70, 140, 280, 310, 310):
+        await _fail_refresh(
+            coordinator,
+            aioclient_mock,
+            expected_seconds=expected_seconds,
+            status=500,
+            json={},
+        )
+
+
 async def test_runtime_auth_failure_starts_reauth(
     hass: HomeAssistant, aioclient_mock: Any
 ) -> None:
@@ -375,6 +403,12 @@ async def test_runtime_auth_failure_starts_reauth(
     flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
     assert any(flow["context"]["source"] == SOURCE_REAUTH for flow in flows)
     assert entry.state is ConfigEntryState.LOADED
+    todo_state = hass.states.get("todo.zadachi")
+    calendar_state = hass.states.get("calendar.tasklerq")
+    assert todo_state is not None
+    assert calendar_state is not None
+    assert todo_state.state == STATE_UNAVAILABLE
+    assert calendar_state.state == STATE_UNAVAILABLE
 
 
 @pytest.mark.parametrize(
@@ -414,3 +448,123 @@ async def test_client_rejects_invalid_snapshot(
 
     with pytest.raises(TasklerqServerError):
         await client.async_get_snapshot()
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"status": 500, "json": {}},
+        {"exc": aiohttp.ClientConnectionError()},
+    ],
+)
+async def test_first_snapshot_failure_schedules_retry(
+    hass: HomeAssistant, aioclient_mock: Any, response: dict[str, Any]
+) -> None:
+    """Household доступен, но первый снапшот упал — запись уходит в SETUP_RETRY."""
+    aioclient_mock.get(HOUSEHOLD_URL, json=household_payload())
+    aioclient_mock.get(SNAPSHOT_URL, **response)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_URL: BASE_URL, CONF_TOKEN: TOKEN},
+        unique_id=HOUSEHOLD_ID,
+        entry_id="tasklerq_first_snapshot_failure",
+    )
+    entry.add_to_hass(hass)
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    entry.async_cancel_retry_setup()
+
+
+async def test_permission_error_while_polling_is_update_failed(
+    hass: HomeAssistant, aioclient_mock: Any
+) -> None:
+    """403 в координаторе — UpdateFailed, а не падение записи."""  # noqa: RUF002
+    entry = await _setup_entry(hass, aioclient_mock)
+    coordinator = _coordinator(entry)
+
+    await _fail_refresh(
+        coordinator,
+        aioclient_mock,
+        expected_seconds=30,
+        status=403,
+        json={},
+    )
+
+    assert isinstance(coordinator.last_exception, UpdateFailed)
+    assert "scope" in str(coordinator.last_exception)
+
+
+async def test_auth_error_during_full_resync_starts_reauth(
+    hass: HomeAssistant, aioclient_mock: Any
+) -> None:
+    """401 при повторной полной синхронизации после 422 на курсоре — reauth."""
+    entry = await _setup_entry(
+        hass,
+        aioclient_mock,
+        snapshot=snapshot_payload(next_since=NEXT_SINCE),
+    )
+    coordinator = _coordinator(entry)
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(
+        SNAPSHOT_URL,
+        params={"since": NEXT_SINCE},
+        status=422,
+        json={},
+    )
+    aioclient_mock.get(SNAPSHOT_URL, status=401, json={})
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert coordinator.last_update_success is False
+    flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert any(flow["context"]["source"] == SOURCE_REAUTH for flow in flows)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        {"status": 500, "json": {}},
+        {"exc": aiohttp.ClientConnectionError()},
+    ],
+)
+async def test_entities_become_unavailable_and_recover(
+    hass: HomeAssistant, aioclient_mock: Any, failure: dict[str, Any]
+) -> None:
+    """Сбой polling делает todo и calendar unavailable, успех возвращает их."""
+    entry = await _setup_entry(hass, aioclient_mock)
+    coordinator = _coordinator(entry)
+
+    todo_state = hass.states.get("todo.zadachi")
+    calendar_state = hass.states.get("calendar.tasklerq")
+    assert todo_state is not None
+    assert calendar_state is not None
+    assert todo_state.state != STATE_UNAVAILABLE
+    assert calendar_state.state != STATE_UNAVAILABLE
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(SNAPSHOT_URL, **failure)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    todo_state = hass.states.get("todo.zadachi")
+    calendar_state = hass.states.get("calendar.tasklerq")
+    assert todo_state is not None
+    assert calendar_state is not None
+    assert todo_state.state == STATE_UNAVAILABLE
+    assert calendar_state.state == STATE_UNAVAILABLE
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(SNAPSHOT_URL, json=snapshot_payload())
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    todo_state = hass.states.get("todo.zadachi")
+    calendar_state = hass.states.get("calendar.tasklerq")
+    assert todo_state is not None
+    assert calendar_state is not None
+    assert todo_state.state != STATE_UNAVAILABLE
+    assert calendar_state.state != STATE_UNAVAILABLE

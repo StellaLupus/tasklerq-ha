@@ -23,7 +23,9 @@ from .api import (
     TasklerqConnectionError,
     TasklerqItem,
     TasklerqPermissionError,
+    TasklerqServerError,
     TasklerqValidationError,
+    calendar_event_bounds,
 )
 from .const import DOMAIN
 from .coordinator import TasklerqCoordinator, TasklerqData
@@ -31,6 +33,7 @@ from .coordinator import TasklerqCoordinator, TasklerqData
 _LOGGER = logging.getLogger(__name__)
 
 _API_MAX_DAYS = 366
+_MAX_PAST_YEARS = 2
 
 
 def _unique_id(household_id: str) -> str:
@@ -38,36 +41,27 @@ def _unique_id(household_id: str) -> str:
     return f"{DOMAIN}:{household_id}:calendar"
 
 
+def _years_before(day: date, years: int) -> date:
+    """Дата на N календарных лет раньше с поправкой на 29 февраля."""  # noqa: RUF002
+    try:
+        return day.replace(year=day.year - years)
+    except ValueError:
+        return day.replace(year=day.year - years, day=28)
+
+
 def _payload_start_date(payload: TasklerqCalendarEvent, timezone: tzinfo) -> date:
     """Локальная дата начала вхождения в timezone household."""
-    if payload["all_day"]:
-        return date.fromisoformat(payload["start"])
-    start = dt_util.parse_datetime(payload["start"])
-    if start is None:
-        raise HomeAssistantError(
-            "Tasklerq вернул событие календаря с неверным временем."  # noqa: RUF001
-        )
-    return start.astimezone(timezone).date()
+    start, _ = calendar_event_bounds(payload)
+    if isinstance(start, datetime):
+        return start.astimezone(timezone).date()
+    return start
 
 
 def _build_event(
     payload: TasklerqCalendarEvent, items: dict[str, TasklerqItem]
 ) -> CalendarEvent:
     """Собрать CalendarEvent, взяв описание из notes известной позиции."""
-    start: date | datetime
-    end: date | datetime
-    if payload["all_day"]:
-        start = date.fromisoformat(payload["start"])
-        end = date.fromisoformat(payload["end"])
-    else:
-        parsed_start = dt_util.parse_datetime(payload["start"])
-        parsed_end = dt_util.parse_datetime(payload["end"])
-        if parsed_start is None or parsed_end is None:
-            raise HomeAssistantError(
-                "Tasklerq вернул событие календаря с неверным временем."  # noqa: RUF001
-            )
-        start = parsed_start
-        end = parsed_end
+    start, end = calendar_event_bounds(payload)
 
     item = items.get(payload["item_id"])
     return CalendarEvent(
@@ -98,22 +92,34 @@ def _calendar_error(err: TasklerqApiError) -> HomeAssistantError:
     if isinstance(err, TasklerqValidationError):
         return HomeAssistantError(
             "Tasklerq не смог отдать календарь: слишком большой период "
-            "или больше 1000 вхождений. Уменьшите период."
+            "или больше 1000 вхождений. Уменьшите период.",
+            translation_domain=DOMAIN,
+            translation_key="calendar_rejected",
         )
     if isinstance(err, TasklerqAuthenticationError):
-        return HomeAssistantError("Tasklerq отклонил токен. Обновите токен интеграции.")
+        return HomeAssistantError(
+            "Tasklerq: нужна повторная авторизация. Обновите токен интеграции.",
+            translation_domain=DOMAIN,
+            translation_key="reauth_required",
+        )
     if isinstance(err, TasklerqPermissionError):
         return HomeAssistantError(
-            "У токена Tasklerq нет прав на чтение календаря: нужен scope ha:read."  # noqa: RUF001
+            "У токена Tasklerq нет прав на чтение календаря: нужен scope ha:read.",  # noqa: RUF001
+            translation_domain=DOMAIN,
+            translation_key="calendar_forbidden",
         )
-    if isinstance(err, TasklerqConnectionError):
+    if isinstance(err, (TasklerqConnectionError, TasklerqServerError)):
         return HomeAssistantError(
             "Не удалось подключиться к Tasklerq для загрузки календаря. "  # noqa: RUF001
-            "Проверьте подключение и повторите попытку."
+            "Проверьте подключение и повторите попытку.",
+            translation_domain=DOMAIN,
+            translation_key="calendar_unavailable",
         )
     return HomeAssistantError(
         "Не удалось загрузить события календаря Tasklerq. "  # noqa: RUF001
-        "Проверьте подключение и повторите попытку."
+        "Проверьте подключение и повторите попытку.",
+        translation_domain=DOMAIN,
+        translation_key="calendar_failed",
     )
 
 
@@ -198,6 +204,10 @@ class TasklerqCalendarEntity(CalendarEntity):
                     start=current.isoformat(), end=chunk_end.isoformat()
                 )
             except TasklerqApiError as err:
+                if isinstance(err, TasklerqAuthenticationError):
+                    entry = self._coordinator.config_entry
+                    if entry is not None:
+                        entry.async_start_reauth(self._coordinator.hass)
                 raise _calendar_error(err) from err
             for payload in payloads:
                 event = _build_event(payload, items)
@@ -248,6 +258,13 @@ class TasklerqCalendarEntity(CalendarEntity):
         today = dt_util.now(timezone).date()
         start_day = start_date.astimezone(timezone).date()
         end_day = _exclusive_end_date(end_date, timezone)
+        if start_day < _years_before(today, _MAX_PAST_YEARS):
+            raise HomeAssistantError(
+                "Tasklerq отдаёт события календаря не дальше чем за 2 года "
+                "до сегодняшнего дня. Уменьшите период запроса.",
+                translation_domain=DOMAIN,
+                translation_key="calendar_too_old",
+            )
 
         events = self._snapshot_events(data, start_date, end_date)
         if start_day < today:

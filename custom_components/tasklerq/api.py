@@ -1,11 +1,13 @@
 """Асинхронный клиент API Tasklerq."""
 
 from dataclasses import dataclass
+from datetime import date, datetime
 from typing import Any, TypedDict, cast
 
 import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.util import dt as dt_util
 
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=10)
 
@@ -15,16 +17,23 @@ class TasklerqApiError(Exception):
 
     def __init__(
         self,
-        message: str,
+        message: str | None,
         *,
         code: str | None = None,
         details: dict[str, Any] | None = None,
+        status: int | None = None,
     ) -> None:
-        """Сохранить сообщение и конверт ошибки API, если он есть."""
-        super().__init__(message)
+        """Сохранить сообщение, конверт ошибки API и HTTP-статус."""
+        fallback = (
+            f"Tasklerq returned HTTP {status}"
+            if status is not None
+            else "Tasklerq request failed"
+        )
+        super().__init__(message or fallback)
         self.code = code
         self.message = message
         self.details: dict[str, Any] = details or {}
+        self.status = status
 
 
 class TasklerqConnectionError(TasklerqApiError):
@@ -372,10 +381,45 @@ def _parse_item(value: Any) -> TasklerqItem:
     )
 
 
+def calendar_event_bounds(
+    event: TasklerqCalendarEvent,
+) -> tuple[date | datetime, date | datetime]:
+    """Разобрать и проверить границы события в одном месте."""
+    if event["all_day"]:
+        try:
+            start_date = date.fromisoformat(event["start"])
+            end_date = date.fromisoformat(event["end"])
+        except ValueError as err:
+            raise TasklerqServerError(
+                "Tasklerq response has invalid calendar_event dates"
+            ) from err
+        if end_date < start_date:
+            raise TasklerqServerError(
+                "Tasklerq response has invalid calendar_event dates"
+            )
+        return start_date, end_date
+    try:
+        start = dt_util.parse_datetime(event["start"])
+        end = dt_util.parse_datetime(event["end"])
+    except ValueError as err:
+        raise TasklerqServerError(
+            "Tasklerq response has invalid calendar_event dates"
+        ) from err
+    if (
+        start is None
+        or end is None
+        or start.tzinfo is None
+        or end.tzinfo is None
+        or end < start
+    ):
+        raise TasklerqServerError("Tasklerq response has invalid calendar_event dates")
+    return start, end
+
+
 def _parse_calendar_event(value: Any) -> TasklerqCalendarEvent:
-    """Разобрать объект CalendarEvent."""
+    """Разобрать объект CalendarEvent и проверить даты начала и конца."""
     data = _dict_value(value, "calendar_event")
-    return TasklerqCalendarEvent(
+    event = TasklerqCalendarEvent(
         item_id=_string(data, "item_id", "calendar_event"),
         list_id=_string(data, "list_id", "calendar_event"),
         occurrence_key=_string(data, "occurrence_key", "calendar_event"),
@@ -385,6 +429,8 @@ def _parse_calendar_event(value: Any) -> TasklerqCalendarEvent:
         title=_string(data, "title", "calendar_event"),
         status=_string(data, "status", "calendar_event"),
     )
+    calendar_event_bounds(event)
+    return event
 
 
 def _parse_snapshot(payload: Any) -> TasklerqSnapshot:
@@ -461,11 +507,13 @@ class TasklerqApiClient:
         code: str | None = None
         message: str | None = None
         details: dict[str, Any] | None = None
+        raw_text = ""
 
         try:
             payload = await response.json(content_type=None)
         except ValueError:
             payload = None
+            raw_text = (await response.text(errors="replace")).strip()
         if isinstance(payload, dict):
             error = payload.get("error")
             if isinstance(error, dict):
@@ -480,11 +528,14 @@ class TasklerqApiClient:
                     details = cast("dict[str, Any]", raw_details)
 
         status = response.status
+        if message is None and raw_text and 400 <= status < 500:
+            message = raw_text[:500]
         error_class = _ERROR_CLASSES.get(status, TasklerqServerError)
         return error_class(
-            message or f"Tasklerq returned HTTP {status}",
+            message,
             code=code,
             details=details,
+            status=status,
         )
 
     async def _async_get(
