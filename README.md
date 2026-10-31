@@ -24,6 +24,9 @@ Assist и автоматизаций.
 `/config/custom_components/tasklerq`, перезапустите Home Assistant и добавьте
 интеграцию через UI.
 
+Для Tasklerq по адресу вне локальной сети используйте `https://`: `http://`
+принимается только для локальных хостов.
+
 ## Разработка
 
 Проект использует [uv](https://docs.astral.sh/uv/) и Python 3.14.2+.

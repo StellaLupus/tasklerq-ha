@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
+import ipaddress
+import socket
 from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlsplit
@@ -46,6 +49,69 @@ class _ConfigFlowApiError(Exception):
         """Сохранить ключ ошибки формы."""
         super().__init__(error_key)
         self.error_key = error_key
+
+
+_LOCAL_HOST_SUFFIXES = (".local", ".lan", ".home.arpa", ".internal")
+_PRIVATE_NETWORKS = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("fc00::/7"),
+)
+
+
+def _parse_ipv4(host: str) -> ipaddress.IPv4Address | None:
+    """Разобрать IPv4 в любой форме inet_aton или вернуть None."""
+    try:
+        return ipaddress.IPv4Address(socket.inet_aton(host))
+    except OSError, ValueError:
+        return None
+
+
+def _is_local_host(host: str) -> bool:
+    """Вернуть True, если хост относится к локальной сети.
+
+    Однословное имя считается локальным (Docker-имя), только если его нельзя
+    разобрать как IPv4 ни в одной форме inet_aton: десятичной, восьмеричной с
+    ведущим нулём, шестнадцатеричной 0x, из 1–4 частей. Числовые формы
+    локальных адресов, например http://2130706433, считаются локальными.
+    Имя с завершающей точкой — FQDN: после её снятия однословный хост
+    локальный, только если он в списке разрешённых (localhost).
+    Однословные имена принимаются только в ASCII: IDNA-нормализация иначе
+    превращает, например, полноширинные цифры в IPv4-адрес.
+    """  # noqa: RUF002
+    host = host.lower()
+    if not host:
+        return False
+    is_fqdn = host.endswith(".")
+    host = host.rstrip(".")
+    if not host:
+        return False
+
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address | None = _parse_ipv4(host)
+    if address is None:
+        with contextlib.suppress(ValueError):
+            address = ipaddress.ip_address(host)
+    if address is not None:
+        return (
+            address.is_loopback
+            or address.is_link_local
+            or any(address in network for network in _PRIVATE_NETWORKS)
+        )
+    if host == "localhost":
+        return True
+    # Docker-имя без домена, например tasklerq; FQDN tasklerq. сюда не входит.
+    if "." not in host:
+        return host.isascii() and not is_fqdn
+    return host.endswith(_LOCAL_HOST_SUFFIXES)
+
+
+def _requires_https(url: str) -> bool:
+    """Вернуть True, если HTTP-адрес указывает вне локальной сети."""
+    parsed = urlsplit(url)
+    if parsed.scheme != "http":
+        return False
+    return not _is_local_host(parsed.hostname or "")
 
 
 def _normalize_url(raw_url: str) -> str | None:
@@ -133,6 +199,8 @@ class TasklerqConfigFlow(ConfigFlow, domain=DOMAIN):
             url = _normalize_url(user_input[CONF_URL])
             if url is None:
                 errors["base"] = "invalid_url"
+            elif _requires_https(url):
+                errors["base"] = "https_required"
             else:
                 token = user_input[CONF_TOKEN].strip()
                 try:

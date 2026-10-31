@@ -130,6 +130,7 @@
     "error": {
       "cannot_connect": "Не удаётся подключиться к Tasklerq. Проверьте URL и доступность сервера.",
       "invalid_url": "Некорректный URL: укажите адрес http:// или https:// с именем хоста.",
+      "https_required": "Для адреса вне локальной сети нужен HTTPS. Укажите https:// в URL Tasklerq.",
       "invalid_auth": "Неверный токен",
       "missing_scope": "У токена нет прав: нужен scope ha:read, а для записи и capture — ha:write и capture:write.",
       "household_not_found": "Household не найден. Возможно, он был удалён.",

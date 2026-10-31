@@ -2,7 +2,7 @@
 
 from typing import Any
 
-BASE_URL = "http://tasklerq.test"
+BASE_URL = "http://tasklerq"
 HOUSEHOLD_URL = f"{BASE_URL}/api/v1/household"
 SNAPSHOT_URL = f"{BASE_URL}/api/v1/snapshot"
 

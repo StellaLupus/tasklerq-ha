@@ -4,6 +4,7 @@ from typing import Any
 
 import aiohttp
 import pytest
+from custom_components.tasklerq.config_flow import _requires_https
 from custom_components.tasklerq.const import (
     CONF_CALENDAR_DAYS,
     CONF_SCAN_INTERVAL,
@@ -181,6 +182,92 @@ async def test_user_invalid_url(
     assert result["errors"] == {"base": "invalid_url"}
     assert not aioclient_mock.mock_calls
     assert hass.config_entries.async_entries(DOMAIN) == []
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:18080",
+        "http://192.168.1.10",
+        "http://10.0.0.5",
+        "http://172.16.0.1",
+        "http://169.254.1.1",
+        "http://[fd00::1]",
+        "http://[fe80::1]",
+        "http://localhost:8080",
+        "http://localhost.",
+        "http://tasklerq:8080",
+        "http://host.docker.internal:18080",
+        "http://nas.local",
+        "http://nas.lan",
+        "http://nas.home.arpa",
+        "http://vault.internal",
+        # Числовая форма 127.0.0.1, которую понимает inet_aton.
+        "http://2130706433",
+        "http://0x7f000001",
+        "http://0177.0.0.1",
+    ],
+)
+def test_http_allowed_for_local_hosts(url: str) -> None:
+    """HTTP разрешён для хостов локальной сети."""
+    assert not _requires_https(url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://tasklerq.stellalupus.ru",
+        "http://8.8.8.8",
+        "http://example.com",
+        "http://100.100.1.1",
+        "http://134744072",
+        "http://0x08080808",
+        "http://8.8.2056",
+        "http://8.526344",
+        "http://com.",
+        "http://com..",
+        "http://tasklerq.",
+        # Полноширинные цифры: IDNA приводит их к IPv4 134744072 и 0x08080808.
+        "http://\uff11\uff13\uff14\uff17\uff14\uff14\uff10\uff17\uff12",
+        "http://\uff10\uff58\uff10\uff18\uff10\uff18\uff10\uff18\uff10\uff18",
+    ],
+)
+def test_http_requires_https_for_public_hosts(url: str) -> None:
+    """HTTP для публичного хоста требует HTTPS."""
+    assert _requires_https(url)
+
+
+def test_https_allowed_for_public_host() -> None:
+    """HTTPS разрешён для любого хоста."""
+    assert not _requires_https("https://tasklerq.stellalupus.ru")
+
+
+async def test_user_public_http_requires_https(
+    hass: HomeAssistant, aioclient_mock: Any
+) -> None:
+    """Публичный хост по HTTP отклоняется без запроса к серверу."""
+    result = await _submit_user(hass, url="http://example.com")
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert result["errors"] == {"base": "https_required"}
+    assert not aioclient_mock.mock_calls
+    assert hass.config_entries.async_entries(DOMAIN) == []
+
+
+async def test_user_public_https_checks_household(
+    hass: HomeAssistant, aioclient_mock: Any
+) -> None:
+    """Публичный хост по HTTPS проходит обычную проверку household."""
+    aioclient_mock.get(
+        "https://example.com/api/v1/household",
+        json=household_payload(),
+    )
+
+    result = await _submit_user(hass, url="https://example.com")
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"] == {CONF_URL: "https://example.com", CONF_TOKEN: TOKEN}
 
 
 async def test_user_duplicate_household(

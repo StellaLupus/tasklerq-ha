@@ -1,0 +1,218 @@
+{
+  "exceptions": {
+    "conflict": {
+      "message": "Tasklerq: the item has already been changed in Tasklerq. Refresh and retry the action."
+    },
+    "reauth_required": {
+      "message": "Tasklerq: reauthentication required. Update the integration token."
+    },
+    "write_forbidden": {
+      "message": "The Tasklerq token cannot write: the ha:write scope is required."
+    },
+    "not_found": {
+      "message": "The list or task was not found in Tasklerq. It may have been deleted; the list has been refreshed."
+    },
+    "validation_error": {
+      "message": "Tasklerq rejected the task changes{reason}."
+    },
+    "unavailable": {
+      "message": "Tasklerq is unavailable. Check the connection and try again."
+    },
+    "write_failed": {
+      "message": "Failed to save changes to Tasklerq. Check the connection and try again."
+    },
+    "capture_action_forbidden": {
+      "message": "The Tasklerq token cannot capture: the capture:write scope is required."
+    },
+    "capture_action_reauth": {
+      "message": "Tasklerq: reauthentication required. Update the integration token."
+    },
+    "capture_action_unavailable": {
+      "message": "Tasklerq is unavailable. Check the connection and try again."
+    },
+    "capture_ambiguous_entry": {
+      "message": "Several Tasklerq integrations. Specify list_id from the lists of the required integration."
+    },
+    "capture_conflict": {
+      "message": "Tasklerq is already processing this capture. Try again later. If the task did not appear, submit the text \"{text}\" again."
+    },
+    "capture_disabled": {
+      "message": "The Tasklerq Capture API is disabled. The text \"{text}\" was not saved."
+    },
+    "capture_failed": {
+      "message": "Failed to send the text \"{text}\" to Tasklerq. It may not have been saved: check the list and try again."
+    },
+    "capture_forbidden": {
+      "message": "The Tasklerq token cannot capture: the capture:write scope is required. The text \"{text}\" was not saved."
+    },
+    "capture_invalid": {
+      "message": "Tasklerq rejected the capture{reason}. The text \"{text}\" was not saved."
+    },
+    "capture_llm_unavailable": {
+      "message": "Tasklerq could not parse the text: parsing is unavailable. The text \"{text}\" was not saved."
+    },
+    "capture_not_configured": {
+      "message": "Tasklerq is not configured or not loaded. Add the Tasklerq integration."
+    },
+    "capture_rate_limited": {
+      "message": "Too many capture requests to Tasklerq. Retry in {retry_after} s. The text \"{text}\" was not saved."
+    },
+    "capture_reauth": {
+      "message": "Tasklerq: reauthentication required. The text \"{text}\" was not saved. Update the integration token."
+    },
+    "capture_too_long": {
+      "message": "The capture text is too long. The text \"{text}\" was not saved."
+    },
+    "capture_unavailable": {
+      "message": "Tasklerq is unavailable. The text \"{text}\" may not have been saved: check the list and try again."
+    },
+    "cancel_capture_conflict": {
+      "message": "The capture has already been applied. Only a pending draft can be cancelled."
+    },
+    "cancel_capture_not_found": {
+      "message": "The capture draft was not found in Tasklerq, or the Capture API is disabled."
+    },
+    "confirm_capture_conflict": {
+      "message": "The capture draft has already been cancelled or cannot be confirmed."
+    },
+    "confirm_capture_expired": {
+      "message": "The capture draft has expired (older than 15 minutes). Create a new draft."
+    },
+    "confirm_capture_invalid": {
+      "message": "Tasklerq rejected the draft items{reason}."
+    },
+    "confirm_capture_not_found": {
+      "message": "The capture draft was not found in Tasklerq, or the Capture API is disabled."
+    },
+    "undo_capture_conflict": {
+      "message": "The items of the last capture have already been changed or cancelled; nothing was deleted."
+    },
+    "undo_capture_disabled": {
+      "message": "The Capture API in Tasklerq is disabled."
+    },
+    "undo_capture_unavailable": {
+      "message": "Tasklerq is unavailable. Failed to undo the last capture. Check the connection and try again."
+    },
+    "calendar_too_old": {
+      "message": "Tasklerq provides calendar events no earlier than 2 years before today. Reduce the requested period."
+    },
+    "calendar_rejected": {
+      "message": "Tasklerq could not provide the calendar: the period is too large or there are more than 1000 occurrences. Reduce the period."
+    },
+    "calendar_forbidden": {
+      "message": "The Tasklerq token cannot read the calendar: the ha:read scope is required."
+    },
+    "calendar_unavailable": {
+      "message": "Failed to connect to Tasklerq to load the calendar. Check the connection and try again."
+    },
+    "calendar_failed": {
+      "message": "Failed to load Tasklerq calendar events. Check the connection and try again."
+    }
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Tasklerq",
+        "description": "Enter the Tasklerq server URL and API token. The token needs the ha:read scope, and for writing and capture — ha:write and capture:write.",
+        "data": {
+          "url": "Tasklerq URL",
+          "token": "API token"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthentication",
+        "description": "The old Tasklerq token is no longer accepted. Enter a new token for this household.",
+        "data": {
+          "token": "API token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to Tasklerq. Check the URL and server availability.",
+      "invalid_url": "Invalid URL: enter an http:// or https:// address with a host name.",
+      "https_required": "An HTTPS URL is required for addresses outside the local network. Use https:// in the Tasklerq URL.",
+      "invalid_auth": "Invalid token",
+      "missing_scope": "The token lacks permissions: the ha:read scope is required, and for writing and capture — ha:write and capture:write.",
+      "household_not_found": "Household not found. It may have been deleted.",
+      "unknown": "Unknown Tasklerq error. Check the server address and try again."
+    },
+    "abort": {
+      "already_configured": "The integration for this household is already configured.",
+      "wrong_household": "The new token belongs to another household. The current entry was not changed.",
+      "reauth_successful": "The Tasklerq token has been updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Tasklerq settings",
+        "description": "Configure the polling interval and calendar horizon.",
+        "data": {
+          "scan_interval": "Polling interval, seconds",
+          "calendar_days": "Calendar horizon, days"
+        }
+      }
+    },
+    "error": {
+      "invalid_scan_interval": "The polling interval must be between 30 and 300 seconds.",
+      "invalid_calendar_days": "The calendar horizon must be between 7 and 90 days."
+    }
+  },
+  "services": {
+    "capture": {
+      "name": "Capture text",
+      "description": "Send text to Tasklerq to parse it and create tasks.",
+      "fields": {
+        "text": {
+          "name": "Text",
+          "description": "A phrase to parse, for example \"buy milk tomorrow\"."
+        },
+        "source": {
+          "name": "Source",
+          "description": "Capture source. Defaults to ha_automation."
+        },
+        "mode": {
+          "name": "Mode",
+          "description": "auto creates items immediately, draft saves a draft."
+        },
+        "hint": {
+          "name": "List hint",
+          "description": "Preferred list for parsing."
+        },
+        "list_id": {
+          "name": "List ID",
+          "description": "A specific Tasklerq list for the created items."
+        },
+        "idempotency_key": {
+          "name": "Idempotency key",
+          "description": "Usually generated by the component; a repeated call does not create a duplicate."
+        }
+      }
+    },
+    "confirm_capture": {
+      "name": "Confirm capture",
+      "description": "Confirm the capture draft and create items.",
+      "fields": {
+        "draft_id": {
+          "name": "Draft ID",
+          "description": "Draft ID returned by tasklerq.capture."
+        }
+      }
+    },
+    "cancel_capture": {
+      "name": "Cancel capture",
+      "description": "Cancel the capture draft without creating items.",
+      "fields": {
+        "draft_id": {
+          "name": "Draft ID",
+          "description": "Draft ID returned by tasklerq.capture."
+        }
+      }
+    },
+    "undo_last_capture": {
+      "name": "Undo last capture",
+      "description": "Undo the last voice capture from the last 10 minutes.",
+      "fields": {}
+    }
+  }
+}

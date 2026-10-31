@@ -120,7 +120,7 @@ async def test_diagnostics_redacts_url_credentials(
     entry = await _setup_entry(
         hass,
         aioclient_mock,
-        url="http://user:pass@tasklerq.test",
+        url="http://user:pass@tasklerq",
     )
 
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
