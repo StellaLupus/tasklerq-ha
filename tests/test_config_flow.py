@@ -23,34 +23,22 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-BASE_URL = "http://tasklerq.test"
-HOUSEHOLD_URL = f"{BASE_URL}/api/v1/household"
-HOUSEHOLD_ID = "019a1b2c-3d4e-7f60-8a9b-0c1d2e3f4a5b"
-OTHER_HOUSEHOLD_ID = "019a1b2c-4a5b-7c6d-8e9f-0a1b2c3d4e5f"
-TOKEN = "tlq_test"
-NEW_TOKEN = "tlq_new"
+from .const import (
+    BASE_URL,
+    HOUSEHOLD_ID,
+    HOUSEHOLD_URL,
+    NEW_TOKEN,
+    OTHER_HOUSEHOLD_ID,
+    SNAPSHOT_URL,
+    TOKEN,
+    household_payload,
+    snapshot_payload,
+)
 
 
 def _entry_state(entry: MockConfigEntry) -> ConfigEntryState:
     """Вернуть состояние entry без сужения типа между проверками."""
     return entry.state
-
-
-def _household_payload(
-    household_id: str = HOUSEHOLD_ID, name: str = "Семья"
-) -> dict[str, Any]:
-    """Ответ GET /api/v1/household по примеру из ha-api.md."""
-    return {
-        "household": {
-            "id": household_id,
-            "name": name,
-            "timezone": "Europe/Moscow",
-            "created_at": "2026-10-01T08:00:00Z",
-            "updated_at": "2026-10-01T08:00:00Z",
-            "deleted_at": None,
-        },
-        "members": [],
-    }
 
 
 async def _start_user_flow(hass: HomeAssistant) -> ConfigFlowResult:
@@ -77,7 +65,8 @@ async def _setup_entry(
     hass: HomeAssistant, aioclient_mock: Any, token: str = "tlq_old"
 ) -> MockConfigEntry:
     """Добавить и загрузить запись с известным household."""  # noqa: RUF002
-    aioclient_mock.get(HOUSEHOLD_URL, json=_household_payload())
+    aioclient_mock.get(HOUSEHOLD_URL, json=household_payload())
+    aioclient_mock.get(SNAPSHOT_URL, json=snapshot_payload())
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={CONF_URL: BASE_URL, CONF_TOKEN: token},
@@ -103,7 +92,7 @@ async def test_user_form(hass: HomeAssistant) -> None:
 
 async def test_user_success(hass: HomeAssistant, aioclient_mock: Any) -> None:
     """Успешная настройка сохраняет household, URL и токен."""
-    aioclient_mock.get(HOUSEHOLD_URL, json=_household_payload())
+    aioclient_mock.get(HOUSEHOLD_URL, json=household_payload())
 
     result = await _submit_user(hass, url=f"{BASE_URL}/")
 
@@ -198,7 +187,7 @@ async def test_user_duplicate_household(
     hass: HomeAssistant, aioclient_mock: Any
 ) -> None:
     """Повторная настройка того же household прерывается."""
-    aioclient_mock.get(HOUSEHOLD_URL, json=_household_payload())
+    aioclient_mock.get(HOUSEHOLD_URL, json=household_payload())
 
     first = await _submit_user(hass)
     second = await _submit_user(hass)
@@ -222,7 +211,8 @@ async def test_reauth_success(hass: HomeAssistant, aioclient_mock: Any) -> None:
     assert result["step_id"] == "reauth_confirm"
 
     aioclient_mock.clear_requests()
-    aioclient_mock.get(HOUSEHOLD_URL, json=_household_payload())
+    aioclient_mock.get(HOUSEHOLD_URL, json=household_payload())
+    aioclient_mock.get(SNAPSHOT_URL, json=snapshot_payload())
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_TOKEN: NEW_TOKEN}
     )
@@ -262,7 +252,8 @@ async def test_reauth_after_setup_auth_failure(
     assert len(reauth_flows) == 1
 
     aioclient_mock.clear_requests()
-    aioclient_mock.get(HOUSEHOLD_URL, json=_household_payload())
+    aioclient_mock.get(HOUSEHOLD_URL, json=household_payload())
+    aioclient_mock.get(SNAPSHOT_URL, json=snapshot_payload())
     result = await hass.config_entries.flow.async_configure(
         reauth_flows[0]["flow_id"], {CONF_TOKEN: NEW_TOKEN}
     )
@@ -287,7 +278,7 @@ async def test_reauth_wrong_household(hass: HomeAssistant, aioclient_mock: Any) 
     )
     aioclient_mock.clear_requests()
     aioclient_mock.get(
-        HOUSEHOLD_URL, json=_household_payload(OTHER_HOUSEHOLD_ID, "Другая семья")
+        HOUSEHOLD_URL, json=household_payload(OTHER_HOUSEHOLD_ID, "Другая семья")
     )
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_TOKEN: NEW_TOKEN}
@@ -340,7 +331,8 @@ async def test_options_save_reloads_entry(
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     aioclient_mock.clear_requests()
-    aioclient_mock.get(HOUSEHOLD_URL, json=_household_payload())
+    aioclient_mock.get(HOUSEHOLD_URL, json=household_payload())
+    aioclient_mock.get(SNAPSHOT_URL, json=snapshot_payload())
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {CONF_SCAN_INTERVAL: 120, CONF_CALENDAR_DAYS: 45},
@@ -351,7 +343,7 @@ async def test_options_save_reloads_entry(
 
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.LOADED
-    assert aioclient_mock.call_count == 1
+    assert aioclient_mock.call_count == 2
 
 
 @pytest.mark.parametrize(

@@ -16,24 +16,14 @@ from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-BASE_URL = "http://tasklerq.test"
-HOUSEHOLD_URL = f"{BASE_URL}/api/v1/household"
-HOUSEHOLD_ID = "019a1b2c-3d4e-7f60-8a9b-0c1d2e3f4a5b"
-
-
-def _household_payload() -> dict[str, Any]:
-    """Ответ GET /api/v1/household по примеру из ha-api.md."""
-    return {
-        "household": {
-            "id": HOUSEHOLD_ID,
-            "name": "Семья",
-            "timezone": "Europe/Moscow",
-            "created_at": "2026-10-01T08:00:00Z",
-            "updated_at": "2026-10-01T08:00:00Z",
-            "deleted_at": None,
-        },
-        "members": [],
-    }
+from .const import (
+    BASE_URL,
+    HOUSEHOLD_ID,
+    HOUSEHOLD_URL,
+    SNAPSHOT_URL,
+    household_payload,
+    snapshot_payload,
+)
 
 
 def _entry_state(entry: MockConfigEntry) -> ConfigEntryState:
@@ -57,7 +47,8 @@ async def test_setup_and_unload_registers_services(
     hass: HomeAssistant, aioclient_mock: Any
 ) -> None:
     """Интеграция загружается и регистрирует сервисы, выгрузка их снимает."""
-    aioclient_mock.get(HOUSEHOLD_URL, json=_household_payload())
+    aioclient_mock.get(HOUSEHOLD_URL, json=household_payload())
+    aioclient_mock.get(SNAPSHOT_URL, json=snapshot_payload())
     entry = _mock_entry()
     entry.add_to_hass(hass)
 
@@ -81,7 +72,8 @@ async def test_unload_one_entry_keeps_services_for_another(
     hass: HomeAssistant, aioclient_mock: Any
 ) -> None:
     """Выгрузка одной записи не снимает сервисы, пока загружена другая."""
-    aioclient_mock.get(HOUSEHOLD_URL, json=_household_payload())
+    aioclient_mock.get(HOUSEHOLD_URL, json=household_payload())
+    aioclient_mock.get(SNAPSHOT_URL, json=snapshot_payload())
     first = _mock_entry(entry_id="tasklerq_first", unique_id=HOUSEHOLD_ID)
     second = _mock_entry(
         entry_id="tasklerq_second",
