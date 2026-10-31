@@ -1,0 +1,32 @@
+# Фразы Tasklerq для Assist. Скопируйте файл в
+# /config/custom_sentences/ru/tasklerq.yaml и перезапустите Home Assistant.
+#
+# Список `tasklerq_text` с `wildcard: true` ловит остаток фразы целиком:
+# «купи молоко и хлеб» -> tasklerq_text="молоко и хлеб". Имя с префиксом
+# выбрано, чтобы не конфликтовать с чужими списками `text` в других файлах
+# custom_sentences.
+language: ru
+intents:
+  TasklerqAddTask:
+    data:
+      - sentences:
+          - "добавь задачу {tasklerq_text}"
+          - "запиши задачу {tasklerq_text}"
+          - "напомни {tasklerq_text}"
+
+  TasklerqAddShopping:
+    data:
+      - sentences:
+          - "добавь в покупки {tasklerq_text}"
+          - "купи {tasklerq_text}"
+          - "в список покупок {tasklerq_text}"
+
+  TasklerqUndo:
+    data:
+      - sentences:
+          - "отмени последнее добавление"
+          - "убери последнюю задачу"
+
+lists:
+  tasklerq_text:
+    wildcard: true

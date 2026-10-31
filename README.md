@@ -6,6 +6,8 @@ Assist и автоматизаций.
 
 Минимальная версия Home Assistant — 2025.7.0, текущая целевая — 2026.10.x.
 
+Готовый пример для голосового capture в Assist: [`examples/assist/`](examples/assist/).
+
 ## Установка
 
 ### HACS

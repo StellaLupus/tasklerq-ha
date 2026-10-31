@@ -1,0 +1,62 @@
+# Пример пакета Home Assistant для голосового capture Tasklerq через Assist.
+#
+# Подключение: скопируйте файл в /config/packages/ и добавьте в
+# configuration.yaml:
+#
+#   homeassistant:
+#     packages: !include_dir_named packages
+#
+# Фразы лежат в custom_sentences/ru/tasklerq.yaml. В `conversation: intents:`
+# нельзя объявить wildcard-список: `{tasklerq_text}` там ссылается на
+# несуществующий слот-лист, и hassil завершает разбор ошибкой MissingListError.
+#
+# `speech` рендерится после действий, поэтому ответ сервиса доступен в
+# intent_script только как `action_response` — его возвращает `stop` с
+# `response_variable`. Если сервис вернул ошибку, `continue_on_error` пропускает
+# шаг, переменная `response` остаётся неопределённой, `stop` завершает скрипт
+# как aborted, `action_response` не появляется, и шаблон озвучивает запасную
+# фразу. Причина ошибки во фразе не называется: она остаётся в журнале и
+# трассировке Home Assistant.
+intent_script:
+  TasklerqAddTask:
+    speech:
+      text: >-
+        {{ action_response.speech if action_response is defined and action_response.speech is defined and action_response.speech else 'Не удалось добавить задачу. Возможно, она не сохранена: проверьте список в Tasklerq.' }}
+    action:
+      - action: tasklerq.capture
+        data:
+          text: "{{ tasklerq_text }}"
+          source: ha_voice
+          mode: auto
+          hint: tasks
+        response_variable: response
+        continue_on_error: true
+      - stop: ""
+        response_variable: response
+
+  TasklerqAddShopping:
+    speech:
+      text: >-
+        {{ action_response.speech if action_response is defined and action_response.speech is defined and action_response.speech else 'Не удалось добавить покупки. Возможно, они не сохранены: проверьте список в Tasklerq.' }}
+    action:
+      - action: tasklerq.capture
+        data:
+          text: "{{ tasklerq_text }}"
+          source: ha_voice
+          mode: auto
+          hint: shopping
+        response_variable: response
+        continue_on_error: true
+      - stop: ""
+        response_variable: response
+
+  TasklerqUndo:
+    speech:
+      text: >-
+        {{ action_response.speech if action_response is defined and action_response.speech is defined and action_response.speech else 'Не удалось отменить последнее добавление. Проверьте Tasklerq.' }}
+    action:
+      - action: tasklerq.undo_last_capture
+        response_variable: response
+        continue_on_error: true
+      - stop: ""
+        response_variable: response
