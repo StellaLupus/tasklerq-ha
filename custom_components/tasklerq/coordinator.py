@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, tzinfo
+from datetime import date, datetime, timedelta, tzinfo
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -89,6 +89,17 @@ class TasklerqCoordinator(DataUpdateCoordinator[TasklerqData]):
     def client(self) -> TasklerqApiClient:
         """Клиент API для платформ."""
         return self._client
+
+    @property
+    def timezone(self) -> tzinfo:
+        """Timezone household, в котором считается календарный день."""
+        return self._timezone
+
+    @property
+    def calendar_horizon_end(self) -> date:
+        """Исключающий конец горизонта календаря из options."""
+        today = dt_util.now(self._timezone).date()
+        return today + timedelta(days=self._calendar_days)
 
     async def _async_update_data(self) -> TasklerqData:
         """Запросить снапшот и применить его к локальному состоянию."""  # noqa: RUF002

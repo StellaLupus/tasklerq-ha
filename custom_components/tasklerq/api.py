@@ -545,6 +545,20 @@ class TasklerqApiClient:
         _, members = await self.async_get_household_and_members()
         return members
 
+    async def async_get_calendar(
+        self, *, start: str, end: str
+    ) -> list[TasklerqCalendarEvent]:
+        """Получить вхождения календаря за [start, end) по датам YYYY-MM-DD."""
+        payload = await self._async_get(
+            "/api/v1/calendar", params={"start": start, "end": end}
+        )
+        if not isinstance(payload, dict):
+            raise TasklerqServerError("Tasklerq calendar response is not an object")
+        return [
+            _parse_calendar_event(value)
+            for value in _list(payload, "events", "calendar")
+        ]
+
     async def async_create_item(
         self,
         list_id: str,

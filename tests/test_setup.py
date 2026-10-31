@@ -111,7 +111,8 @@ async def test_unload_failure_keeps_services(
 ) -> None:
     """Если платформы не выгрузились, сервисы остаются зарегистрированными."""
     aioclient_mock.get(HOUSEHOLD_URL, json=household_payload())
-    aioclient_mock.get(SNAPSHOT_URL, json=snapshot_payload())
+    # Без событий календарь не оставляет таймеров после намеренно сломанной выгрузки.
+    aioclient_mock.get(SNAPSHOT_URL, json=snapshot_payload(calendar_events=[]))
     entry = _mock_entry()
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)

@@ -185,6 +185,9 @@ def calendar_event_payload(
     *,
     list_id: str = LIST_ID,
     occurrence_key: str | None = None,
+    start: str = "2026-11-05",
+    end: str = "2026-11-06",
+    all_day: bool = True,
     title: str = "Оплатить интернет",
     status: str = "open",
 ) -> dict[str, Any]:
@@ -192,10 +195,10 @@ def calendar_event_payload(
     return {
         "item_id": item_id,
         "list_id": list_id,
-        "occurrence_key": occurrence_key or f"{item_id}:2026-11-05",
-        "start": "2026-11-05",
-        "end": "2026-11-06",
-        "all_day": True,
+        "occurrence_key": occurrence_key or f"{item_id}:{start}",
+        "start": start,
+        "end": end,
+        "all_day": all_day,
         "title": title,
         "status": status,
     }
