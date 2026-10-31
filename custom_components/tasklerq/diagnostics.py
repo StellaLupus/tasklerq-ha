@@ -16,19 +16,7 @@ from homeassistant.util import dt as dt_util
 from . import TasklerqConfigEntry
 from .const import CONF_TOKEN, CONF_URL, DOMAIN
 
-_TO_REDACT = {
-    CONF_TOKEN,
-    "token",
-    "access_token",
-    "refresh_token",
-    "password",
-    "username",
-    "user",
-    "members",
-    "title",
-    "notes",
-    "description",
-}
+_TO_REDACT = {CONF_TOKEN}
 
 
 def _url_without_credentials(raw_url: str) -> str:

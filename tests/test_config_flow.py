@@ -219,6 +219,7 @@ def test_http_allowed_for_local_hosts(url: str) -> None:
         "http://tasklerq.stellalupus.ru",
         "http://8.8.8.8",
         "http://example.com",
+        "http://100.64.1.2",
         "http://100.100.1.1",
         "http://134744072",
         "http://0x08080808",
@@ -242,11 +243,12 @@ def test_https_allowed_for_public_host() -> None:
     assert not _requires_https("https://tasklerq.stellalupus.ru")
 
 
+@pytest.mark.parametrize("url", ["http://example.com", "http://100.64.1.2"])
 async def test_user_public_http_requires_https(
-    hass: HomeAssistant, aioclient_mock: Any
+    hass: HomeAssistant, aioclient_mock: Any, url: str
 ) -> None:
-    """Публичный хост по HTTP отклоняется без запроса к серверу."""
-    result = await _submit_user(hass, url="http://example.com")
+    """Публичный хост и адрес Tailscale по HTTP отклоняются без запроса."""
+    result = await _submit_user(hass, url=url)
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "user"

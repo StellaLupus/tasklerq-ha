@@ -183,6 +183,13 @@ class _FakeAsyncio:
         self._loop.now += delay
 
 
+def _patch_retry_clock(monkeypatch: pytest.MonkeyPatch) -> _FakeLoop:
+    """Подменить asyncio в api.py управляемыми часами повторов."""
+    fake_loop = _FakeLoop()
+    monkeypatch.setattr(api_module, "asyncio", _FakeAsyncio(fake_loop))
+    return fake_loop
+
+
 async def test_capture_applied_returns_response_and_refreshes(
     hass: HomeAssistant, aioclient_mock: Any
 ) -> None:
@@ -476,9 +483,12 @@ async def test_capture_network_retry_does_not_duplicate(
 
 
 async def test_capture_retries_busy_key_with_same_key(
-    hass: HomeAssistant, aioclient_mock: Any
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """409 «ключ занят»: короткое ожидание и повтор тем же ключом."""
+    """409 «ключ занят»: пауза не меньше секунды и повтор тем же ключом."""
+    fake_loop = _patch_retry_clock(monkeypatch)
     await _setup_entry(hass, aioclient_mock)
     aioclient_mock.clear_requests()
     keys: list[str] = []
@@ -505,12 +515,16 @@ async def test_capture_retries_busy_key_with_same_key(
     assert response["status"] == "applied"
     assert len(keys) == 2
     assert keys[0] == keys[1]
+    assert fake_loop.now >= 1.0
 
 
 async def test_capture_network_error_then_busy_key_then_success(
-    hass: HomeAssistant, aioclient_mock: Any
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Сетевой повтор и повтор по 409 не делят общий лимит попыток."""
+    _patch_retry_clock(monkeypatch)
     await _setup_entry(hass, aioclient_mock)
     aioclient_mock.clear_requests()
     keys: list[str] = []
@@ -542,9 +556,12 @@ async def test_capture_network_error_then_busy_key_then_success(
 
 
 async def test_capture_repeats_busy_key_until_success(
-    hass: HomeAssistant, aioclient_mock: Any
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Несколько 409 подряд повторяются, пока укладываются в бюджет."""
+    _patch_retry_clock(monkeypatch)
     await _setup_entry(hass, aioclient_mock)
     aioclient_mock.clear_requests()
     keys: list[str] = []
@@ -604,14 +621,35 @@ async def test_capture_retry_budget_exhausted(
         json=_error_payload("Idempotency key is busy"),
         headers={"Retry-After": "2"},
     )
-    fake_loop = _FakeLoop()
-    monkeypatch.setattr(api_module, "asyncio", _FakeAsyncio(fake_loop))
+    _patch_retry_clock(monkeypatch)
     monkeypatch.setattr(api_module, "CAPTURE_RETRY_BUDGET_VOICE", 2.0)
 
-    with pytest.raises(HomeAssistantError, match="недоступен"):
+    with pytest.raises(HomeAssistantError, match="уже обрабатывает"):
         await _call_capture(hass, {"text": ITEM_TITLE, "source": "ha_voice"})
 
     assert len(_calls(aioclient_mock, "POST", "/api/v1/capture")) == 1
+
+
+async def test_capture_zero_retry_after_exhausts_budget(
+    hass: HomeAssistant, aioclient_mock: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """409 с Retry-After: 0 ждёт секунду, а при исчерпании бюджета — занятый ключ."""  # noqa: RUF002
+    await _setup_entry(hass, aioclient_mock)
+    aioclient_mock.clear_requests()
+    aioclient_mock.post(
+        CAPTURE_URL,
+        status=409,
+        json=_error_payload("Idempotency key is busy"),
+        headers={"Retry-After": "0"},
+    )
+    fake_loop = _patch_retry_clock(monkeypatch)
+    monkeypatch.setattr(api_module, "CAPTURE_RETRY_BUDGET_VOICE", 2.0)
+
+    with pytest.raises(HomeAssistantError, match="уже обрабатывает"):
+        await _call_capture(hass, {"text": ITEM_TITLE, "source": "ha_voice"})
+
+    assert len(_calls(aioclient_mock, "POST", "/api/v1/capture")) == 2
+    assert fake_loop.now == 2.0
 
 
 async def test_capture_uses_source_specific_timeout(

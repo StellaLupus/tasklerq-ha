@@ -66,17 +66,6 @@ DRAFT_SCHEMA = vol.Schema({vol.Required("draft_id"): vol.All(str, vol.Length(min
 EMPTY_SCHEMA = vol.Schema({})
 
 
-def _validation_reason(err: TasklerqApiError) -> str:
-    """Причина отказа из сообщения клиента или простых полей details."""
-    if err.message:
-        return err.message
-    return "; ".join(
-        f"{key}: {value}"
-        for key, value in err.details.items()
-        if isinstance(value, (str, int, float, bool))
-    )
-
-
 def _select_runtime(
     hass: HomeAssistant, *, list_id: str | None
 ) -> tuple[ConfigEntry, TasklerqApiClient, TasklerqCoordinator]:
@@ -223,7 +212,7 @@ def _capture_error(
     if isinstance(err, TasklerqValidationError) or (
         err.status is not None and 400 <= err.status < 500
     ):
-        reason = _validation_reason(err)
+        reason = err.validation_reason
         reason_text = f": {reason}" if reason else ""
         return HomeAssistantError(
             f"Tasklerq отклонил capture{reason_text}. Текст «{text}» не сохранён.",
@@ -276,7 +265,7 @@ def _confirm_capture_error(
     if isinstance(err, TasklerqValidationError) or (
         err.status is not None and 400 <= err.status < 500
     ):
-        reason = _validation_reason(err)
+        reason = err.validation_reason
         reason_text = f": {reason}" if reason else ""
         return HomeAssistantError(
             f"Tasklerq отклонил элементы черновика{reason_text}.",

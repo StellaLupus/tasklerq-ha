@@ -6,10 +6,9 @@ import contextlib
 import ipaddress
 import socket
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-import voluptuous as vol
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigEntryState,
@@ -41,6 +40,9 @@ from .const import (
     MIN_SCAN_INTERVAL,
 )
 
+if TYPE_CHECKING:
+    import probatio
+
 
 class _ConfigFlowApiError(Exception):
     """Ошибка клиента Tasklerq с ключом для формы."""  # noqa: RUF002
@@ -64,7 +66,8 @@ def _parse_ipv4(host: str) -> ipaddress.IPv4Address | None:
     """Разобрать IPv4 в любой форме inet_aton или вернуть None."""
     try:
         return ipaddress.IPv4Address(socket.inet_aton(host))
-    except OSError, ValueError:
+    # PEP 758 не используется: модуль должен импортироваться на Python 3.13.
+    except (OSError, ValueError):  # fmt: skip
         return None
 
 
@@ -147,8 +150,10 @@ async def _async_fetch_household(
         raise _ConfigFlowApiError("unknown") from err
 
 
-def _user_schema() -> vol.Schema:
+def _user_schema() -> probatio.Schema:
     """Схема шага ввода URL и токена."""
+    import probatio as vol
+
     return vol.Schema(
         {
             vol.Required(CONF_URL): str,
@@ -157,13 +162,17 @@ def _user_schema() -> vol.Schema:
     )
 
 
-def _reauth_schema() -> vol.Schema:
+def _reauth_schema() -> probatio.Schema:
     """Схема шага повторной аутентификации."""
+    import probatio as vol
+
     return vol.Schema({vol.Required(CONF_TOKEN): str})
 
 
-def _options_schema(values: Mapping[str, Any]) -> vol.Schema:
+def _options_schema(values: Mapping[str, Any]) -> probatio.Schema:
     """Схема options с текущими значениями по умолчанию."""  # noqa: RUF002
+    import probatio as vol
+
     return vol.Schema(
         {
             vol.Required(
@@ -215,10 +224,9 @@ class TasklerqConfigFlow(ConfigFlow, domain=DOMAIN):
                         data={CONF_URL: url, CONF_TOKEN: token},
                     )
 
-        # HA типизирует data_schema как probatio.Schema; vol.Schema — другой тип.
         return self.async_show_form(
             step_id="user",
-            data_schema=_user_schema(),  # type: ignore[arg-type]
+            data_schema=_user_schema(),
             errors=errors or None,
         )
 
@@ -257,10 +265,9 @@ class TasklerqConfigFlow(ConfigFlow, domain=DOMAIN):
                     self.hass.config_entries.async_schedule_reload(entry.entry_id)
                 return self.async_abort(reason="reauth_successful")
 
-        # HA типизирует data_schema как probatio.Schema; vol.Schema — другой тип.
         return self.async_show_form(
             step_id="reauth_confirm",
-            data_schema=_reauth_schema(),  # type: ignore[arg-type]
+            data_schema=_reauth_schema(),
             errors=errors or None,
         )
 
@@ -285,9 +292,8 @@ class TasklerqOptionsFlow(OptionsFlow):
                 return self.async_create_entry(data=user_input)
 
         values = user_input if user_input is not None else self.config_entry.options
-        # HA типизирует data_schema как probatio.Schema; vol.Schema — другой тип.
         return self.async_show_form(
             step_id="init",
-            data_schema=_options_schema(values),  # type: ignore[arg-type]
+            data_schema=_options_schema(values),
             errors=errors or None,
         )

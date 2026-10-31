@@ -54,6 +54,17 @@ class TasklerqApiError(Exception):
         self.status = status
         self.retry_after = retry_after
 
+    @property
+    def validation_reason(self) -> str:
+        """Причина отказа из сообщения клиента или простых полей details."""
+        if self.message:
+            return self.message
+        return "; ".join(
+            f"{key}: {value}"
+            for key, value in self.details.items()
+            if isinstance(value, (str, int, float, bool))
+        )
+
 
 class TasklerqConnectionError(TasklerqApiError):
     """Tasklerq недоступен: нет связи или истёк таймаут."""
@@ -852,9 +863,12 @@ class TasklerqApiClient:
         loop = asyncio.get_running_loop()
         started = loop.time()
         network_retries = 0
+        last_conflict: TasklerqConflictError | None = None
         while True:
             remaining = budget - (loop.time() - started)
             if remaining <= 0:
+                if last_conflict is not None:
+                    raise last_conflict
                 raise TasklerqConnectionError("Tasklerq capture retry budget exhausted")
             try:
                 response = await self._async_request(
@@ -869,17 +883,19 @@ class TasklerqApiClient:
             except TasklerqConflictError as err:
                 # 409 на capture означает занятый Idempotency-Key: повторяем
                 # тем же ключом и телом, пока ожидание укладывается в бюджет.
-                delay = (
+                last_conflict = err
+                delay = max(
                     err.retry_after
                     if err.retry_after is not None
-                    else CAPTURE_DEFAULT_RETRY_AFTER
+                    else CAPTURE_DEFAULT_RETRY_AFTER,
+                    1.0,
                 )
                 if delay > budget - (loop.time() - started):
                     raise
-                if delay > 0:
-                    await asyncio.sleep(delay)
+                await asyncio.sleep(delay)
                 continue
             except TasklerqConnectionError:
+                last_conflict = None
                 if network_retries >= CAPTURE_MAX_NETWORK_RETRIES:
                     raise
                 network_retries += 1

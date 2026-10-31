@@ -52,20 +52,9 @@ def _unique_id(household_id: str, list_id: str) -> str:
     return f"{DOMAIN}:{household_id}:{list_id}"
 
 
-def _validation_reason(err: TasklerqApiError) -> str:
-    """Причина отказа из сообщения клиента или простых полей details."""
-    if err.message:
-        return err.message
-    return "; ".join(
-        f"{key}: {value}"
-        for key, value in err.details.items()
-        if isinstance(value, (str, int, float, bool))
-    )
-
-
 def _validation_error(err: TasklerqApiError) -> HomeAssistantError:
     """Ошибка отклонённого запроса с причиной в тексте и переводе."""  # noqa: RUF002
-    reason = _validation_reason(err)
+    reason = err.validation_reason
     reason_text = f": {reason}" if reason else ""
     return HomeAssistantError(
         f"Tasklerq отклонил изменения задачи{reason_text}",

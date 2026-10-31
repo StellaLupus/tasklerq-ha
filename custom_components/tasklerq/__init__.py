@@ -27,7 +27,6 @@ from .api import (
 )
 from .const import CONF_TOKEN, CONF_URL, DOMAIN, MIN_HOME_ASSISTANT_VERSION
 from .coordinator import TasklerqCoordinator, read_options
-from .services import async_setup_services, async_unload_services
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -65,6 +64,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: TasklerqConfigEntry) -> 
             f"{MIN_HOME_ASSISTANT_VERSION} или новее; "
             f"установлена версия {HA_VERSION}"
         )
+
+    # services импортирует probatio и другие новые API HA: на старых версиях
+    # модуль должен оставаться неимпортированным, чтобы проверка версии успела
+    # сработать и дать понятную ошибку вместо ImportError.
+    from .services import async_setup_services
 
     client = TasklerqApiClient(
         hass,
@@ -137,5 +141,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: TasklerqConfigEntry) ->
         for other in hass.config_entries.async_entries(DOMAIN)
     )
     if not other_loaded:
+        from .services import async_unload_services
+
         async_unload_services(hass)
     return True

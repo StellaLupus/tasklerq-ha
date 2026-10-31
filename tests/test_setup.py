@@ -1,9 +1,13 @@
 """Загрузка и выгрузка интеграции Tasklerq."""
 
+import importlib
 import logging
+import sys
 from typing import Any
 
 import aiohttp
+import custom_components.tasklerq as tasklerq_module
+import custom_components.tasklerq.config_flow as config_flow_module
 import pytest
 from custom_components.tasklerq import async_unload_entry
 from custom_components.tasklerq.const import (
@@ -133,23 +137,38 @@ async def test_incompatible_home_assistant_version(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """При версии HA ниже минимальной интеграция падает в SETUP_ERROR."""
-    monkeypatch.setattr("custom_components.tasklerq.HA_VERSION", "2025.6.0")
+    """При версии HA ниже минимальной интеграция падает в SETUP_ERROR.
 
-    entry = _mock_entry()
-    entry.add_to_hass(hass)
+    Модули services и config_flow используют probatio из нового HA, поэтому при
+    старой версии они не должны импортировать его на верхнем уровне: иначе
+    вместо предупреждения получим ImportError ещё до проверки версии.
+    """  # noqa: RUF002
+    monkeypatch.setitem(sys.modules, "custom_components.tasklerq.services", None)
+    monkeypatch.setitem(sys.modules, "probatio", None)
+    try:
+        module = importlib.reload(tasklerq_module)
+        importlib.reload(config_flow_module)
+        monkeypatch.setattr(module, "HA_VERSION", "2025.6.0")
 
-    with caplog.at_level(logging.WARNING, logger="custom_components.tasklerq"):
-        assert not await hass.config_entries.async_setup(entry.entry_id)
+        entry = _mock_entry()
+        entry.add_to_hass(hass)
 
-    await hass.async_block_till_done()
+        with caplog.at_level(logging.WARNING, logger="custom_components.tasklerq"):
+            assert not await hass.config_entries.async_setup(entry.entry_id)
 
-    assert entry.state is ConfigEntryState.SETUP_ERROR
-    assert entry.reason is not None
-    assert MIN_HOME_ASSISTANT_VERSION in entry.reason
-    assert MIN_HOME_ASSISTANT_VERSION in caplog.text
-    for service in SERVICES:
-        assert not hass.services.has_service(DOMAIN, service)
+        await hass.async_block_till_done()
+
+        assert entry.state is ConfigEntryState.SETUP_ERROR
+        assert entry.reason is not None
+        assert MIN_HOME_ASSISTANT_VERSION in entry.reason
+        assert MIN_HOME_ASSISTANT_VERSION in caplog.text
+        for service in SERVICES:
+            assert not hass.services.has_service(DOMAIN, service)
+    finally:
+        # Вернуть исходные sys.modules до повторной загрузки модулей.
+        monkeypatch.undo()
+        importlib.reload(tasklerq_module)
+        importlib.reload(config_flow_module)
 
 
 async def test_setup_auth_failure_starts_reauth(
