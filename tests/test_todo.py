@@ -333,6 +333,123 @@ async def test_missing_list_removes_entity(
     assert er.async_get(hass).async_get("todo.dacha") is None
 
 
+async def test_events_list_does_not_create_todo_entity(
+    hass: HomeAssistant, aioclient_mock: Any
+) -> None:
+    """Для списка kind events сущность todo не создаётся."""
+    await _setup_entry(
+        hass,
+        aioclient_mock,
+        lists=[
+            list_payload(LIST_ID),
+            list_payload(
+                OTHER_LIST_ID,
+                kind="events",
+                name="Календарь",
+                is_default=False,
+                position=1,
+            ),
+        ],
+        items=[],
+    )
+
+    assert hass.states.get("todo.kalendar") is None
+    assert er.async_get(hass).async_get("todo.kalendar") is None
+    assert hass.states.get("todo.zadachi") is not None
+
+
+async def test_events_list_removes_old_todo_registry_entry(
+    hass: HomeAssistant, aioclient_mock: Any
+) -> None:
+    """Запись реестра todo для списка событий от прошлой версии удаляется."""
+    entry = await _setup_entry(
+        hass,
+        aioclient_mock,
+        lists=[
+            list_payload(LIST_ID),
+            list_payload(
+                OTHER_LIST_ID,
+                kind="tasks",
+                name="Календарь",
+                is_default=False,
+                position=1,
+            ),
+        ],
+        items=[],
+    )
+    assert er.async_get(hass).async_get("todo.kalendar") is not None
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert er.async_get(hass).async_get("todo.kalendar") is not None
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(HOUSEHOLD_URL, json=household_payload())
+    aioclient_mock.get(
+        SNAPSHOT_URL,
+        json=snapshot_payload(
+            lists=[
+                list_payload(LIST_ID),
+                list_payload(
+                    OTHER_LIST_ID,
+                    kind="events",
+                    name="Календарь",
+                    is_default=False,
+                    position=1,
+                ),
+            ],
+            items=[],
+        ),
+    )
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.get("todo.kalendar") is None
+    assert er.async_get(hass).async_get("todo.kalendar") is None
+
+
+async def test_list_becoming_events_removes_todo_entity(
+    hass: HomeAssistant, aioclient_mock: Any
+) -> None:
+    """Смена kind списка на events удаляет живую сущность при обновлении."""
+    entry = await _setup_entry(
+        hass,
+        aioclient_mock,
+        lists=[
+            list_payload(LIST_ID),
+            list_payload(
+                OTHER_LIST_ID,
+                kind="tasks",
+                name="Календарь",
+                is_default=False,
+                position=1,
+            ),
+        ],
+        items=[],
+    )
+    assert hass.states.get("todo.kalendar") is not None
+
+    await _refresh_with(
+        hass,
+        aioclient_mock,
+        entry,
+        lists=[
+            list_payload(LIST_ID),
+            list_payload(
+                OTHER_LIST_ID,
+                kind="events",
+                name="Календарь",
+                is_default=False,
+                position=1,
+            ),
+        ],
+        items=[],
+    )
+
+    assert hass.states.get("todo.kalendar") is None
+    assert er.async_get(hass).async_get("todo.kalendar") is None
+
+
 async def test_archived_list_removed_from_registry_on_setup(
     hass: HomeAssistant, aioclient_mock: Any
 ) -> None:

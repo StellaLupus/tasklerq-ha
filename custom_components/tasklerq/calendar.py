@@ -49,12 +49,27 @@ def _years_before(day: date, years: int) -> date:
         return day.replace(year=day.year - years, day=28)
 
 
-def _payload_start_date(payload: TasklerqCalendarEvent, timezone: tzinfo) -> date:
-    """Локальная дата начала вхождения в timezone household."""
-    start, _ = calendar_event_bounds(payload)
-    if isinstance(start, datetime):
-        return start.astimezone(timezone).date()
-    return start
+def _in_calendar_horizon(
+    payload: TasklerqCalendarEvent,
+    timezone: tzinfo,
+    today: date,
+    horizon_end: date,
+) -> bool:
+    """Пересекается ли вхождение с горизонтом [сегодня, horizon_end)."""  # noqa: RUF002
+    start, end = calendar_event_bounds(payload)
+    start_local = (
+        start.astimezone(timezone)
+        if isinstance(start, datetime)
+        else datetime.combine(start, time.min, tzinfo=timezone)
+    )
+    end_local = (
+        end.astimezone(timezone)
+        if isinstance(end, datetime)
+        else datetime.combine(end, time.min, tzinfo=timezone)
+    )
+    day_start = datetime.combine(today, time.min, tzinfo=timezone)
+    horizon_start = datetime.combine(horizon_end, time.min, tzinfo=timezone)
+    return end_local > day_start and start_local < horizon_start
 
 
 def _build_event(
@@ -76,6 +91,18 @@ def _build_event(
 def _overlaps(event: CalendarEvent, start: datetime, end: datetime) -> bool:
     """Пересекается ли событие с запрошенным интервалом."""  # noqa: RUF002
     return event.start_datetime_local < end and event.end_datetime_local > start
+
+
+def _deduplicate_events(events: list[CalendarEvent]) -> list[CalendarEvent]:
+    """Оставить одно событие на uid: свежий ответ API важнее снапшота."""
+    # Идущее вхождение приходит и в снапшоте (горизонт начинается сегодня), и
+    # в ответе /calendar за прошлую часть интервала. uid — occurrence_key,
+    # всегда заполнен _build_event.
+    unique: dict[str, CalendarEvent] = {}
+    for event in events:
+        if event.uid is not None:
+            unique[event.uid] = event
+    return list(unique.values())
 
 
 def _exclusive_end_date(end: datetime, timezone: tzinfo) -> date:
@@ -178,8 +205,7 @@ class TasklerqCalendarEntity(CalendarEntity):
         horizon_end = self._coordinator.calendar_horizon_end
         events: list[CalendarEvent] = []
         for payload in data.calendar_events:
-            event_date = _payload_start_date(payload, timezone)
-            if event_date < today or event_date >= horizon_end:
+            if not _in_calendar_horizon(payload, timezone, today, horizon_end):
                 continue
             event = _build_event(payload, data.items)
             if _overlaps(event, start, end):
@@ -228,8 +254,7 @@ class TasklerqCalendarEntity(CalendarEntity):
         upcoming: CalendarEvent | None = None
 
         for payload in data.calendar_events:
-            event_date = _payload_start_date(payload, timezone)
-            if event_date < today or event_date >= horizon_end:
+            if not _in_calendar_horizon(payload, timezone, today, horizon_end):
                 continue
             event = _build_event(payload, data.items)
             if event.start_datetime_local <= now < event.end_datetime_local:
@@ -280,6 +305,7 @@ class TasklerqCalendarEntity(CalendarEntity):
                     )
                 )
 
+        events = _deduplicate_events(events)
         events.sort(
             key=lambda event: (
                 event.start_datetime_local,

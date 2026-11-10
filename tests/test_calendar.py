@@ -69,6 +69,7 @@ async def _setup_entry(
     hass: HomeAssistant,
     aioclient_mock: Any,
     *,
+    lists: list[dict[str, Any]] | None = None,
     items: list[dict[str, Any]],
     calendar_events: list[dict[str, Any]],
     calendar_truncated: bool = False,
@@ -78,7 +79,7 @@ async def _setup_entry(
     aioclient_mock.get(
         SNAPSHOT_URL,
         json=snapshot_payload(
-            lists=[list_payload(LIST_ID)],
+            lists=[list_payload(LIST_ID)] if lists is None else lists,
             items=items,
             calendar_events=calendar_events,
             calendar_truncated=calendar_truncated,
@@ -198,6 +199,477 @@ async def test_all_day_event_stays_all_day(
     assert events[0].start == date(2026, 11, 5)
     assert events[0].end == date(2026, 11, 6)
     assert events[0].all_day is True
+
+
+async def test_event_with_real_end(
+    hass: HomeAssistant, aioclient_mock: Any, freezer: Any
+) -> None:
+    """Событие Tasklerq показывается с настоящим концом из ответа API."""  # noqa: RUF002
+    await hass.config.async_set_time_zone("Europe/Moscow")
+    freezer.move_to("2026-11-10T12:00:00+00:00")
+    occurrence_key = f"{ITEM_ID}:2026-11-11T11:00:00Z"
+    await _setup_entry(
+        hass,
+        aioclient_mock,
+        lists=[
+            list_payload(
+                LIST_ID,
+                kind="events",
+                name="Календарь",
+                is_default=False,
+            )
+        ],
+        items=[
+            item_payload(
+                ITEM_ID,
+                title="Маникюр",
+                due_date=None,
+                due_at="2026-11-11T11:00:00Z",
+                end_at="2026-11-11T12:30:00Z",
+            )
+        ],
+        calendar_events=[
+            calendar_event_payload(
+                ITEM_ID,
+                kind="events",
+                occurrence_key=occurrence_key,
+                start="2026-11-11T11:00:00Z",
+                end="2026-11-11T12:30:00Z",
+                all_day=False,
+                title="Маникюр",
+            )
+        ],
+    )
+
+    events = await _calendar_entity(hass).async_get_events(
+        hass,
+        datetime(2026, 11, 11, tzinfo=MOSCOW),
+        datetime(2026, 11, 12, tzinfo=MOSCOW),
+    )
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.summary == "Маникюр"
+    assert event.start == datetime(2026, 11, 11, 14, 0, tzinfo=MOSCOW)
+    assert event.end == datetime(2026, 11, 11, 15, 30, tzinfo=MOSCOW)
+    assert event.all_day is False
+    assert event.uid == occurrence_key
+
+
+async def test_multiday_all_day_event_is_shown_in_full(
+    hass: HomeAssistant, aioclient_mock: Any, freezer: Any
+) -> None:
+    """Многодневное вседневное событие показывается одним событием целиком."""
+    await hass.config.async_set_time_zone("Europe/Moscow")
+    freezer.move_to("2026-11-03T12:00:00+00:00")
+    await _setup_entry(
+        hass,
+        aioclient_mock,
+        lists=[
+            list_payload(
+                LIST_ID,
+                kind="events",
+                name="Календарь",
+                is_default=False,
+            )
+        ],
+        items=[
+            item_payload(
+                ITEM_ID,
+                title="Отпуск",
+                due_date="2026-11-05",
+                due_at=None,
+                end_date="2026-11-10",
+            )
+        ],
+        calendar_events=[
+            calendar_event_payload(
+                ITEM_ID,
+                kind="events",
+                occurrence_key=f"{ITEM_ID}:2026-11-05",
+                start="2026-11-05",
+                end="2026-11-11",
+                all_day=True,
+                title="Отпуск",
+            )
+        ],
+    )
+
+    events = await _calendar_entity(hass).async_get_events(
+        hass,
+        datetime(2026, 11, 3, tzinfo=MOSCOW),
+        datetime(2026, 11, 15, tzinfo=MOSCOW),
+    )
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.summary == "Отпуск"
+    assert event.start == date(2026, 11, 5)
+    assert event.end == date(2026, 11, 11)
+    assert event.end - event.start == timedelta(days=6)
+    assert event.all_day is True
+
+
+async def test_multiday_timed_event_crosses_midnight(
+    hass: HomeAssistant, aioclient_mock: Any, freezer: Any
+) -> None:
+    """Многодневное событие со временем сохраняет начало и конец через ночь."""  # noqa: RUF002
+    await hass.config.async_set_time_zone("Europe/Moscow")
+    freezer.move_to("2026-11-03T12:00:00+00:00")
+    await _setup_entry(
+        hass,
+        aioclient_mock,
+        lists=[
+            list_payload(
+                LIST_ID,
+                kind="events",
+                name="Календарь",
+                is_default=False,
+            )
+        ],
+        items=[
+            item_payload(
+                ITEM_ID,
+                title="Поезд",
+                due_date=None,
+                due_at="2026-11-05T22:00:00Z",
+                end_at="2026-11-06T03:00:00Z",
+            )
+        ],
+        calendar_events=[
+            calendar_event_payload(
+                ITEM_ID,
+                kind="events",
+                occurrence_key=f"{ITEM_ID}:2026-11-05T22:00:00Z",
+                start="2026-11-05T22:00:00Z",
+                end="2026-11-06T03:00:00Z",
+                all_day=False,
+                title="Поезд",
+            )
+        ],
+    )
+
+    events = await _calendar_entity(hass).async_get_events(
+        hass,
+        datetime(2026, 11, 3, tzinfo=MOSCOW),
+        datetime(2026, 11, 8, tzinfo=MOSCOW),
+    )
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.summary == "Поезд"
+    assert event.start == datetime(2026, 11, 6, 1, 0, tzinfo=MOSCOW)
+    assert event.end == datetime(2026, 11, 6, 6, 0, tzinfo=MOSCOW)
+    assert event.all_day is False
+
+
+async def test_ongoing_multiday_all_day_event_is_shown(
+    hass: HomeAssistant, aioclient_mock: Any, freezer: Any
+) -> None:
+    """Идущее вседневное событие с началом до сегодня видно и даёт state on."""  # noqa: RUF002
+    await hass.config.async_set_time_zone("Europe/Moscow")
+    freezer.move_to("2027-03-07T12:00:00+00:00")
+    await _setup_entry(
+        hass,
+        aioclient_mock,
+        lists=[
+            list_payload(
+                LIST_ID,
+                kind="events",
+                name="Календарь",
+                is_default=False,
+            )
+        ],
+        items=[
+            item_payload(
+                ITEM_ID,
+                title="Отпуск",
+                due_date="2027-03-05",
+                due_at=None,
+                end_date="2027-03-10",
+            )
+        ],
+        calendar_events=[
+            calendar_event_payload(
+                ITEM_ID,
+                kind="events",
+                occurrence_key=f"{ITEM_ID}:2027-03-05",
+                start="2027-03-05",
+                end="2027-03-11",
+                all_day=True,
+                title="Отпуск",
+            )
+        ],
+    )
+    entity = _calendar_entity(hass)
+
+    events = await entity.async_get_events(
+        hass,
+        datetime(2027, 3, 7, tzinfo=MOSCOW),
+        datetime(2027, 3, 8, tzinfo=MOSCOW),
+    )
+
+    assert [event.summary for event in events] == ["Отпуск"]
+    assert _state(hass, "calendar.tasklerq").state == "on"
+    current = entity.event
+    assert current is not None
+    assert current.summary == "Отпуск"
+    assert current.start == date(2027, 3, 5)
+    assert current.end == date(2027, 3, 11)
+
+
+async def test_ongoing_overnight_event_is_shown(
+    hass: HomeAssistant, aioclient_mock: Any, freezer: Any
+) -> None:
+    """Событие 22:00→03:00, идущее в 01:00, видно и даёт state on."""
+    await hass.config.async_set_time_zone("Europe/Moscow")
+    freezer.move_to("2026-11-06T01:00:00+03:00")
+    await _setup_entry(
+        hass,
+        aioclient_mock,
+        lists=[
+            list_payload(
+                LIST_ID,
+                kind="events",
+                name="Календарь",
+                is_default=False,
+            )
+        ],
+        items=[
+            item_payload(
+                ITEM_ID,
+                title="Поезд",
+                due_date=None,
+                due_at="2026-11-05T19:00:00Z",
+                end_at="2026-11-06T00:00:00Z",
+            )
+        ],
+        calendar_events=[
+            calendar_event_payload(
+                ITEM_ID,
+                kind="events",
+                occurrence_key=f"{ITEM_ID}:2026-11-05T19:00:00Z",
+                start="2026-11-05T19:00:00Z",
+                end="2026-11-06T00:00:00Z",
+                all_day=False,
+                title="Поезд",
+            )
+        ],
+    )
+    entity = _calendar_entity(hass)
+
+    events = await entity.async_get_events(
+        hass,
+        datetime(2026, 11, 6, tzinfo=MOSCOW),
+        datetime(2026, 11, 7, tzinfo=MOSCOW),
+    )
+
+    assert [event.summary for event in events] == ["Поезд"]
+    assert _state(hass, "calendar.tasklerq").state == "on"
+    current = entity.event
+    assert current is not None
+    assert current.summary == "Поезд"
+    assert current.start == datetime(2026, 11, 5, 22, 0, tzinfo=MOSCOW)
+    assert current.end == datetime(2026, 11, 6, 3, 0, tzinfo=MOSCOW)
+
+
+@pytest.mark.parametrize(
+    ("now", "start", "end", "all_day"),
+    [
+        ("2027-03-07T12:00:00+03:00", "2027-03-05", "2027-03-11", True),
+        (
+            "2027-03-07T00:10:00+03:00",
+            "2027-03-06T20:30:00Z",
+            "2027-03-06T21:30:00Z",
+            False,
+        ),
+    ],
+)
+async def test_ongoing_event_is_not_duplicated_with_calendar_api(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    freezer: Any,
+    now: str,
+    start: str,
+    end: str,
+    all_day: bool,
+) -> None:
+    """Идущее вхождение из снапшота и из /calendar показывается один раз."""
+    await hass.config.async_set_time_zone("Europe/Moscow")
+    freezer.move_to(now)
+    occurrence = calendar_event_payload(
+        ITEM_ID,
+        kind="events",
+        occurrence_key=f"{ITEM_ID}:{start}",
+        start=start,
+        end=end,
+        all_day=all_day,
+        title="Отпуск",
+    )
+    await _setup_entry(
+        hass,
+        aioclient_mock,
+        lists=[
+            list_payload(
+                LIST_ID,
+                kind="events",
+                name="Календарь",
+                is_default=False,
+            )
+        ],
+        items=[
+            item_payload(
+                ITEM_ID,
+                title="Отпуск",
+                due_date=start if all_day else None,
+                due_at=None if all_day else start,
+            )
+        ],
+        calendar_events=[occurrence],
+    )
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(CALENDAR_URL, json={"events": [occurrence]})
+
+    events = await _calendar_entity(hass).async_get_events(
+        hass,
+        datetime(2027, 3, 1, tzinfo=MOSCOW),
+        datetime(2027, 3, 31, tzinfo=MOSCOW),
+    )
+
+    calls = _calls(aioclient_mock, "/api/v1/calendar")
+    assert [_query(call) for call in calls] == [
+        {"start": "2027-03-01", "end": "2027-03-07"}
+    ]
+    assert [event.summary for event in events] == ["Отпуск"]
+    assert [event.uid for event in events] == [occurrence["occurrence_key"]]
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "all_day"),
+    [
+        ("2027-03-06", "2027-03-07", True),
+        ("2027-03-06T19:00:00Z", "2027-03-06T21:00:00Z", False),
+    ],
+)
+async def test_event_ending_at_today_start_is_not_shown(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    freezer: Any,
+    start: str,
+    end: str,
+    all_day: bool,
+) -> None:
+    """Событие с исключающим концом ровно в начале сегодня не показывается."""  # noqa: RUF002
+    await hass.config.async_set_time_zone("Europe/Moscow")
+    freezer.move_to("2027-03-07T12:00:00+03:00")
+    await _setup_entry(
+        hass,
+        aioclient_mock,
+        lists=[
+            list_payload(
+                LIST_ID,
+                kind="events",
+                name="Календарь",
+                is_default=False,
+            )
+        ],
+        items=[
+            item_payload(
+                ITEM_ID,
+                title="Граница",
+                due_date=start if all_day else None,
+                due_at=None if all_day else start,
+            )
+        ],
+        calendar_events=[
+            calendar_event_payload(
+                ITEM_ID,
+                kind="events",
+                start=start,
+                end=end,
+                all_day=all_day,
+                title="Граница",
+            )
+        ],
+    )
+    aioclient_mock.get(CALENDAR_URL, json={"events": []})
+    entity = _calendar_entity(hass)
+
+    assert _state(hass, "calendar.tasklerq").state == "off"
+    assert entity.event is None
+    assert (
+        await entity.async_get_events(
+            hass,
+            datetime(2027, 3, 7, tzinfo=MOSCOW),
+            datetime(2027, 3, 8, tzinfo=MOSCOW),
+        )
+        == []
+    )
+    # Запрос с прошлым днём: снапшот не должен отдавать событие, кончившееся  # noqa: RUF003
+    # ровно в начале сегодняшнего дня.
+    assert (
+        await entity.async_get_events(
+            hass,
+            datetime(2027, 3, 6, tzinfo=MOSCOW),
+            datetime(2027, 3, 8, tzinfo=MOSCOW),
+        )
+        == []
+    )
+
+
+async def test_new_event_fields_are_parsed(
+    hass: HomeAssistant, aioclient_mock: Any
+) -> None:
+    """Поля end_* элемента и kind вхождения календаря сохраняются при разборе."""
+    aioclient_mock.get(
+        SNAPSHOT_URL,
+        json=snapshot_payload(
+            items=[
+                item_payload(
+                    ITEM_ID,
+                    due_date="2026-11-05",
+                    end_date="2026-11-10",
+                )
+            ],
+            calendar_events=[
+                calendar_event_payload(
+                    ITEM_ID,
+                    kind="events",
+                    start="2026-11-05",
+                    end="2026-11-11",
+                )
+            ],
+        ),
+    )
+    client = TasklerqApiClient(hass, BASE_URL, TOKEN)
+
+    snapshot = await client.async_get_snapshot()
+
+    assert snapshot.items[0]["end_at"] is None
+    assert snapshot.items[0]["end_date"] == "2026-11-10"
+    assert snapshot.calendar_events[0]["kind"] == "events"
+
+
+async def test_old_server_payload_without_new_fields_is_accepted(
+    hass: HomeAssistant, aioclient_mock: Any
+) -> None:
+    """Ответ старого сервера без end_* и kind разбирается без ошибки."""
+    item = item_payload(ITEM_ID, due_date="2026-11-05")
+    item.pop("end_at")
+    item.pop("end_date")
+    calendar_event = calendar_event_payload(ITEM_ID)
+    calendar_event.pop("kind")
+    aioclient_mock.get(
+        SNAPSHOT_URL,
+        json=snapshot_payload(items=[item], calendar_events=[calendar_event]),
+    )
+    client = TasklerqApiClient(hass, BASE_URL, TOKEN)
+
+    snapshot = await client.async_get_snapshot()
+
+    assert snapshot.items[0]["end_at"] is None
+    assert snapshot.items[0]["end_date"] is None
+    assert snapshot.calendar_events[0]["kind"] is None
 
 
 async def test_recurring_events_have_distinct_uids_within_horizon(

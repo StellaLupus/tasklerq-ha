@@ -1,8 +1,8 @@
 # Tasklerq for Home Assistant
 
 Custom component Home Assistant для [Tasklerq](https://github.com/StellaLupus/tasklerq):
-списки как `todo`-сущности, задачи со сроком в календаре, сервисы capture для
-Assist и автоматизаций.
+списки как `todo`-сущности, кроме списков событий; задачи со сроком и события
+в календаре; сервисы capture для Assist и автоматизаций.
 
 Минимальная версия Home Assistant — 2026.10.0, текущая целевая — 2026.10.x.
 
