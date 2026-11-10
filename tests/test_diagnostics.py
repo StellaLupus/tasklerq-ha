@@ -93,7 +93,7 @@ async def test_diagnostics_contains_configuration_and_entities(
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
 
     assert diagnostics["url"] == BASE_URL
-    assert diagnostics["version"] == "0.1.0"
+    assert diagnostics["version"] == "0.2.0"
     assert diagnostics["scan_interval"] == 60
     assert diagnostics["calendar_days"] == 30
     assert diagnostics["lists_count"] == 1

@@ -191,6 +191,8 @@ class TasklerqItem(TypedDict):
     priority: str
     due_at: str | None
     due_date: str | None
+    end_at: str | None
+    end_date: str | None
     assignee_user_id: str | None
     created_by_user_id: str | None
     source: str
@@ -215,6 +217,9 @@ class TasklerqCalendarEvent(TypedDict):
 
     item_id: str
     list_id: str
+    # Тип списка элемента: "tasks" или "events". Разбирается для контракта,
+    # событие календаря строится одинаково для обоих типов.
+    kind: str | None
     occurrence_key: str
     start: str
     end: str
@@ -296,9 +301,15 @@ def _string(data: dict[str, Any], key: str, context: str) -> str:
     return _string_value(value, f"{context}.{key}")
 
 
-def _optional_string(data: dict[str, Any], key: str, context: str) -> str | None:
-    """Необязательная строка (null или строка, возможно пустая)."""
-    value = _field(data, key, context)
+def _optional_string(
+    data: dict[str, Any],
+    key: str,
+    context: str,
+    *,
+    allow_missing: bool = False,
+) -> str | None:
+    """Необязательная строка; allow_missing допускает отсутствие поля."""
+    value = data.get(key) if allow_missing else _field(data, key, context)
     if value is None:
         return None
     if not isinstance(value, str):
@@ -454,6 +465,8 @@ def _parse_item(value: Any) -> TasklerqItem:
         priority=_string(data, "priority", "item"),
         due_at=_optional_string(data, "due_at", "item"),
         due_date=_optional_string(data, "due_date", "item"),
+        end_at=_optional_string(data, "end_at", "item", allow_missing=True),
+        end_date=_optional_string(data, "end_date", "item", allow_missing=True),
         assignee_user_id=_optional_string(data, "assignee_user_id", "item"),
         created_by_user_id=_optional_string(data, "created_by_user_id", "item"),
         source=_string(data, "source", "item"),
@@ -517,6 +530,7 @@ def _parse_calendar_event(value: Any) -> TasklerqCalendarEvent:
     event = TasklerqCalendarEvent(
         item_id=_string(data, "item_id", "calendar_event"),
         list_id=_string(data, "list_id", "calendar_event"),
+        kind=_optional_string(data, "kind", "calendar_event", allow_missing=True),
         occurrence_key=_string(data, "occurrence_key", "calendar_event"),
         start=_string(data, "start", "calendar_event"),
         end=_string(data, "end", "calendar_event"),

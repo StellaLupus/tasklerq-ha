@@ -52,6 +52,11 @@ def _unique_id(household_id: str, list_id: str) -> str:
     return f"{DOMAIN}:{household_id}:{list_id}"
 
 
+def _needs_todo_entity(list_data: TasklerqList) -> bool:
+    """Нужна ли списку сущность todo."""
+    return not list_data["is_archived"] and list_data["kind"] != "events"
+
+
 def _validation_error(err: TasklerqApiError) -> HomeAssistantError:
     """Ошибка отклонённого запроса с причиной в тексте и переводе."""  # noqa: RUF002
     reason = err.validation_reason
@@ -402,11 +407,11 @@ async def async_setup_entry(
     desired_items = {
         list_id: list_data
         for list_id, list_data in coordinator.data.lists.items()
-        if not list_data["is_archived"]
+        if _needs_todo_entity(list_data)
     }
 
-    # Убрать из реестра сущности списков, которые архивированы или исчезли,
-    # пока интеграция не была загружена.
+    # Убрать из реестра сущности списков, которые архивированы, исчезли или
+    # стали списками событий, пока интеграция не была загружена.
     desired_unique_ids = {
         _unique_id(household_id, list_id) for list_id in desired_items
     }
@@ -432,7 +437,7 @@ async def async_setup_entry(
             current = {
                 list_id: list_data
                 for list_id, list_data in coordinator.data.lists.items()
-                if not list_data["is_archived"]
+                if _needs_todo_entity(list_data)
             }
 
             new_entities: list[TasklerqTodoListEntity] = []
